@@ -46,5 +46,5 @@ if secure_upload_check(sample_file):
     extracted_medical_record["raw_text"] = raw_content
     extracted_medical_record["status"] = "Extracted"
     
-    print("\n📄 Extracted Content Summary ::")
+    print("\n Extracted Content Summary ::")
     print(extracted_medical_record["raw_text"][:5000] + "...") 
