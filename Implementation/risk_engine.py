@@ -27,7 +27,7 @@ def compute_risk_from_cbc(cbc: Dict[str, Dict[str, Any]]) -> Dict[str, Any]:
     reasons: List[str] = []
     abnormal_count = 0
 
-    # Score weighting (simple + explainable)
+    # Score weighting 
     # - Each abnormal indicator adds points
     # - Certain “key” indicators get a bit more weight
     key_weights = {
@@ -52,8 +52,7 @@ def compute_risk_from_cbc(cbc: Dict[str, Dict[str, Any]]) -> Dict[str, Any]:
     # Cap score at 1.0
     score = min(1.0, score)
 
-    # Map score or abnormal_count → risk level (simple bands)
-    # These thresholds can be tuned later stage.
+    # Map score or abnormal_count → risk level.
     
     if abnormal_count == 0:
         level = "Low"
