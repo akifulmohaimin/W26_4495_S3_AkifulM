@@ -7,13 +7,15 @@
    ID: 300395271
    Email: udayu@student.douglascollege.ca
 
+   <br> <br> <br>
+
 
 # Please check the below steps to run this project
 
 # Download the project from Github Repo.
 
 # Set Up the Environment:
-Open the Project: Open the folder containing the GitHub files in VS Code.
+Open the Project: Open the folder containing the GitHub files in VS Code. <br>
 Create a Virtual Environment: Open the terminal and run python -m venv .venv.
 
 # Activate & Install:
