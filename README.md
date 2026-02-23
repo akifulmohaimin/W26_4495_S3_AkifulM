@@ -17,14 +17,14 @@ Open the Project: Open the folder containing the GitHub files in VS Code.
 Create a Virtual Environment: Open the terminal and run python -m venv .venv.
 
 # Activate & Install:
-Mac/Linux: source .venv/bin/activate.
+Mac/Linux: source .venv/bin/activate. <br>
 Windows: .venv\Scripts\activate.
 
 # Select Interpreter: 
 Press Cmd + Shift + P, search for "Python: Select Interpreter", and choose the one labeled ('.venv': venv).
 
 # Run (in the terminal): 
-pip install streamlit pytesseract pdf2image pillow pypdf 
+pip install streamlit pytesseract pdf2image pillow pypdf <br>
 python -m streamlit run sampleapp.py
 
 
