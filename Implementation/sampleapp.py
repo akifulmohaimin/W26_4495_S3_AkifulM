@@ -65,7 +65,7 @@ with st.expander("Disclaimer", expanded=True):
         "OCR/extraction accuracy depends on report format and scan quality."
     )
 
-# Sidebar controls (helpful on Windows)
+# Sidebar Controls 
 st.sidebar.header("Settings (Optional)")
 poppler_path = st.sidebar.text_input(
     "Poppler path (Windows only, optional)",
@@ -315,4 +315,5 @@ with tab_export:
         )
 
         st.markdown("### JSON Preview")
+
         st.code(json.dumps(rec, indent=2), language="json")
