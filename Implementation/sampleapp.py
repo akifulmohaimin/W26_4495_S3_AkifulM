@@ -38,7 +38,7 @@ def compute_bmi(height_cm: float, weight_kg: float) -> Tuple[Optional[float], st
     height_m = height_cm / 100.0
     bmi = weight_kg / (height_m ** 2)
 
-    # WHO categories (simple)
+    # WHO categories
     if bmi < 18.5:
         cat = "Underweight"
     elif bmi < 25:
@@ -317,3 +317,4 @@ with tab_export:
         st.markdown("### JSON Preview")
 
         st.code(json.dumps(rec, indent=2), language="json")
+
