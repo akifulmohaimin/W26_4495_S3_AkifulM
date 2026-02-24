@@ -25,8 +25,7 @@ The system:
 - Applies supervised ML models (Logistic Regression, Random Forest)
 - Displays non-diagnostic, explainable risk levels
 
-⚠️ This system does NOT provide medical diagnosis.  
-It is for research and educational purposes only.
+This system does NOT provide medical diagnosis. It is for research and educational purposes only.
 
 ---
 
