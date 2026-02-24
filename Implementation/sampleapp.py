@@ -15,7 +15,6 @@
 # RUN:  python -m streamlit run sampleapp.py
 
 
-
 import json
 import tempfile
 from datetime import datetime
@@ -26,6 +25,55 @@ import streamlit as st
 
 from cbc_pipeline import run_extraction_pipeline, extract_cbc_indicators
 from risk_engine import compute_risk_from_cbc
+from authdb import init_db, create_user, verify_user
+
+init_db()
+
+def logout():
+    st.session_state["logged_in"] = False
+    st.session_state["user_id"] = None
+    st.session_state["username"] = None
+
+if "logged_in" not in st.session_state:
+    st.session_state["logged_in"] = False
+    st.session_state["user_id"] = None
+    st.session_state["username"] = None
+
+st.title("CDSS - Patient Portal")
+
+if not st.session_state["logged_in"]:
+    tab1, tab2 = st.tabs(["Login", "Register"])
+
+    with tab1:
+        st.subheader("Login")
+        u = st.text_input("Username", key="login_user")
+        p = st.text_input("Password", type="password", key="login_pass")
+        if st.button("Login"):
+            ok, user_id = verify_user(u, p)
+            if ok:
+                st.session_state["logged_in"] = True
+                st.session_state["user_id"] = user_id
+                st.session_state["username"] = u.strip().lower()
+                st.success("Logged in!")
+                st.rerun()
+            else:
+                st.error("Invalid username or password.")
+
+    with tab2:
+        st.subheader("Register")
+        u2 = st.text_input("Username", key="reg_user")
+        p2 = st.text_input("Password", type="password", key="reg_pass")
+        if st.button("Create account"):
+            ok, msg = create_user(u2, p2)
+            (st.success if ok else st.error)(msg)
+
+    st.stop()
+
+# ----- Protected area -----
+st.sidebar.write(f"Logged in as: **{st.session_state['username']}**")
+if st.sidebar.button("Logout"):
+    logout()
+    st.rerun()
 
 
 # -------------------------
@@ -153,13 +201,12 @@ with tab_upload:
                     "filename": uploaded.name,
                     "type": uploaded.type,
                     "size_bytes": uploaded.size,
-                    "selected_at": datetime.now().isoformat(
-timespec="seconds"),
+                    "selected_at": datetime.now().isoformat(timespec="seconds"),
 
                 }
             )
         else:
-            st.info("Choose a file to run extraction + CBC structuring + risk scoring.")
+            st.info("Choose a file to run extraction.")
 
     with col2:
         st.markdown("### Pipeline Status")
@@ -179,7 +226,7 @@ timespec="seconds"),
                 st.progress(60)
             st.caption(f"Last run: {status}")
 
-    run_btn = st.button("Run Pipeline (Extract → CBC → Risk)", type="primary", disabled=(uploaded is None))
+    run_btn = st.button("Run Pipeline", type="primary", disabled=(uploaded is None))
 
     if run_btn and uploaded is not None:
         suffix = "." + uploaded.name.split(".")[-1].lower()
@@ -187,7 +234,7 @@ timespec="seconds"),
             tmp_path = Path(tmpdir) / f"uploaded{suffix}"
             tmp_path.write_bytes(uploaded.getbuffer())
 
-            with st.spinner("Stage 1: Extracting text (PDF text → OCR fallback)..."):
+            with st.spinner("Stage 1: Extracting text (PDF text → OCR fallback)"):
                 rec = run_extraction_pipeline(str(tmp_path), poppler_path=poppler_path)
 
             if rec.get("status") == "Failed":
@@ -317,5 +364,4 @@ with tab_export:
         st.markdown("### JSON Preview")
 
         st.code(json.dumps(rec, indent=2), language="json")
-
 
