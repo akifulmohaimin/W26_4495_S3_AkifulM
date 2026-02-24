@@ -12,7 +12,7 @@
 # REQUIREMENTS :
 #   pip install streamlit pytesseract pdf2image pillow pypdf
 
-# RUN:  python -m streamlit run app.py
+# RUN:  python -m streamlit run sampleapp.py
 
 
 
@@ -317,4 +317,5 @@ with tab_export:
         st.markdown("### JSON Preview")
 
         st.code(json.dumps(rec, indent=2), language="json")
+
 
