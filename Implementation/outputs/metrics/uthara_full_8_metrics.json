@@ -1,0 +1,38 @@
+{
+    "Logistic Regression (8 Features)": {
+        "Accuracy": 0.7077922077922078,
+        "Precision": 0.6,
+        "Recall": 0.5,
+        "F1 Score": 0.5454545454545454,
+        "ROC-AUC": 0.812962962962963,
+        "Confusion Matrix": [
+            [
+                82,
+                18
+            ],
+            [
+                27,
+                27
+            ]
+        ],
+        "Classification Report": "              precision    recall  f1-score   support\n\n           0       0.75      0.82      0.78       100\n           1       0.60      0.50      0.55        54\n\n    accuracy                           0.71       154\n   macro avg       0.68      0.66      0.67       154\nweighted avg       0.70      0.71      0.70       154\n"
+    },
+    "Random Forest (8 Features)": {
+        "Accuracy": 0.7467532467532467,
+        "Precision": 0.6666666666666666,
+        "Recall": 0.5555555555555556,
+        "F1 Score": 0.6060606060606061,
+        "ROC-AUC": 0.8160185185185184,
+        "Confusion Matrix": [
+            [
+                85,
+                15
+            ],
+            [
+                24,
+                30
+            ]
+        ],
+        "Classification Report": "              precision    recall  f1-score   support\n\n           0       0.78      0.85      0.81       100\n           1       0.67      0.56      0.61        54\n\n    accuracy                           0.75       154\n   macro avg       0.72      0.70      0.71       154\nweighted avg       0.74      0.75      0.74       154\n"
+    }
+}

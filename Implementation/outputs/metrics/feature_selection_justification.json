@@ -1,0 +1,19 @@
+{
+  "selected_features": [
+    "Glucose",
+    "BMI",
+    "BloodPressure",
+    "Age"
+  ],
+  "justification_points": [
+    "Selected features are clinically meaningful and commonly available in patient-accessible records.",
+    "Selected features are feasible to extract from PDFs/OCR or accept as user input.",
+    "Correlation with Outcome was assessed to support relevance for risk modeling."
+  ],
+  "correlation_with_outcome": {
+    "Glucose": 0.4927824039150268,
+    "BMI": 0.31203833867711117,
+    "Age": 0.23835598302719757,
+    "BloodPressure": 0.16572291308057696
+  }
+}
