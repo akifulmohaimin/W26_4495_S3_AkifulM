@@ -1,20 +1,3 @@
-# THIS PYTHON UI SCRIPT INCLUDES 
-
-# CDSS Prototype UI (Stage 1 + Stage 2 + Stage 3 + Patient Inputs/BMI)
-# - Upload PDF/JPG/PNG
-# - Patient inputs (height/weight -> BMI) + a few basic fields
-# - Runs extraction pipeline (PDF embedded text -> OCR fallback)
-# - Parses CBC indicators + flags
-
-# - Computes simple rule-based risk score + explanations
-# - Shows results + raw text preview + JSON export
-
-# REQUIREMENTS :
-#   pip install streamlit pytesseract pdf2image pillow pypdf
-
-# RUN:  python -m streamlit run sampleapp.py
-
-
 import json
 import tempfile
 from datetime import datetime
@@ -23,21 +6,47 @@ from typing import Optional, Tuple
 
 import streamlit as st
 
-from cbc_pipeline import run_extraction_pipeline, extract_cbc_indicators
-from risk_engine import compute_risk_from_cbc
+from disease_pipeline import run_extraction_pipeline, extract_disease_indicators
+from diabetes_model_inference import predict_diabetes_risk
+from disease_risk_engine import compute_diabetes_heart_risk
 from authdb import init_db, create_user, verify_user
 
+st.set_page_config(page_title="CDSS Prototype - Diabetes ML + Heart Rule-Based", layout="wide")
+
 init_db()
+
 
 def logout():
     st.session_state["logged_in"] = False
     st.session_state["user_id"] = None
     st.session_state["username"] = None
 
+
 if "logged_in" not in st.session_state:
     st.session_state["logged_in"] = False
     st.session_state["user_id"] = None
     st.session_state["username"] = None
+
+
+def compute_bmi(height_cm: float, weight_kg: float) -> Tuple[Optional[float], str]:
+    """Returns (bmi_value, bmi_category)."""
+    if height_cm <= 0 or weight_kg <= 0:
+        return None, "Invalid"
+
+    height_m = height_cm / 100.0
+    bmi = weight_kg / (height_m ** 2)
+
+    if bmi < 18.5:
+        cat = "Underweight"
+    elif bmi < 25:
+        cat = "Normal"
+    elif bmi < 30:
+        cat = "Overweight"
+    else:
+        cat = "Obese"
+
+    return round(bmi, 1), cat
+
 
 st.title("CDSS - Patient Portal")
 
@@ -69,7 +78,10 @@ if not st.session_state["logged_in"]:
 
     st.stop()
 
-# ----- Protected area -----
+
+# -------------------------
+# Protected area
+# -------------------------
 st.sidebar.write(f"Logged in as: **{st.session_state['username']}**")
 if st.sidebar.button("Logout"):
     logout()
@@ -77,35 +89,10 @@ if st.sidebar.button("Logout"):
 
 
 # -------------------------
-# Helpers
-# -------------------------
-def compute_bmi(height_cm: float, weight_kg: float) -> Tuple[Optional[float], str]:
-    """Returns (bmi_value, bmi_category)."""
-    if height_cm <= 0 or weight_kg <= 0:
-        return None, "Invalid"
-    height_m = height_cm / 100.0
-    bmi = weight_kg / (height_m ** 2)
-
-    # WHO categories
-    if bmi < 18.5:
-        cat = "Underweight"
-    elif bmi < 25:
-        cat = "Normal"
-    elif bmi < 30:
-        cat = "Overweight"
-    else:
-        cat = "Obese"
-    return round(bmi, 1), cat
-
-
-# -------------------------
 # Page setup
 # -------------------------
-
-st.set_page_config(page_title="CDSS Prototype (Stage 1+2+3)", layout="wide")
-
 st.title("Clinical Decision Support System (CDSS) — Prototype")
-st.caption("Upload → Extract (OCR fallback) → CBC structuring → Risk scoring → Export JSON")
+st.caption("Upload → Extract → Parse indicators → Diabetes ML prediction + Heart rule-based estimate → Export JSON")
 
 with st.expander("Disclaimer", expanded=True):
     st.warning(
@@ -113,7 +100,6 @@ with st.expander("Disclaimer", expanded=True):
         "OCR/extraction accuracy depends on report format and scan quality."
     )
 
-# Sidebar Controls 
 st.sidebar.header("Settings (Optional)")
 poppler_path = st.sidebar.text_input(
     "Poppler path (Windows only, optional)",
@@ -125,14 +111,12 @@ st.sidebar.markdown("---")
 show_raw_text = st.sidebar.checkbox("Show raw extracted text", value=True)
 raw_preview_chars = st.sidebar.slider("Raw text preview length", 500, 12000, 6000, step=500)
 
-# Tabs
 tab_upload, tab_results, tab_export = st.tabs(["Upload", "Results", "Export"])
 
-# Shared state
 if "record" not in st.session_state:
     st.session_state.record = None
-if "cbc" not in st.session_state:
-    st.session_state.cbc = None
+if "indicators" not in st.session_state:
+    st.session_state.indicators = None
 if "risk" not in st.session_state:
     st.session_state.risk = None
 if "patient_inputs" not in st.session_state:
@@ -142,6 +126,8 @@ if "patient_inputs" not in st.session_state:
         "height_cm": 170.0,
         "weight_kg": 65.0,
         "smoker": "No",
+        "family_history_diabetes": "No",
+        "family_history_heart_disease": "No",
         "symptoms": [],
         "consent": True,
     }
@@ -149,13 +135,13 @@ if "patient_inputs" not in st.session_state:
 # -------------------------
 # TAB 1: Upload
 # -------------------------
-
 with tab_upload:
     st.subheader("1) Patient Inputs (Structured)")
 
     pi = st.session_state.patient_inputs
 
     c1, c2, c3 = st.columns(3)
+
     with c1:
         pi["age"] = st.number_input("Age", min_value=0, max_value=120, value=int(pi["age"]))
         pi["sex"] = st.selectbox(
@@ -165,28 +151,56 @@ with tab_upload:
         )
 
     with c2:
-        pi["height_cm"] = st.number_input("Height (cm)", min_value=50.0, max_value=250.0, value=float(pi["height_cm"]), step=0.5)
-        pi["weight_kg"] = st.number_input("Weight (kg)", min_value=10.0, max_value=300.0, value=float(pi["weight_kg"]), step=0.5)
+        pi["height_cm"] = st.number_input(
+            "Height (cm)", min_value=50.0, max_value=250.0, value=float(pi["height_cm"]), step=0.5
+        )
+        pi["weight_kg"] = st.number_input(
+            "Weight (kg)", min_value=10.0, max_value=300.0, value=float(pi["weight_kg"]), step=0.5
+        )
 
     with c3:
         pi["smoker"] = st.selectbox("Smoker", ["No", "Yes"], index=["No", "Yes"].index(pi["smoker"]))
-        pi["symptoms"] = st.multiselect(
-            "Symptoms (optional)",
-            ["Fatigue", "Fever", "Cough", "Shortness of breath", "Dizziness", "Chest pain", "Other"],
-            default=pi["symptoms"],
+        pi["family_history_diabetes"] = st.selectbox(
+            "Family History - Diabetes",
+            ["No", "Yes"],
+            index=["No", "Yes"].index(pi["family_history_diabetes"]),
         )
+        pi["family_history_heart_disease"] = st.selectbox(
+            "Family History - Heart Disease",
+            ["No", "Yes"],
+            index=["No", "Yes"].index(pi["family_history_heart_disease"]),
+        )
+
+    pi["symptoms"] = st.multiselect(
+        "Symptoms (optional)",
+        [
+            "Fatigue",
+            "Frequent urination",
+            "Increased thirst",
+            "Blurred vision",
+            "Chest pain",
+            "Shortness of breath",
+            "Dizziness",
+            "Palpitations",
+            "Other",
+        ],
+        default=pi["symptoms"],
+    )
 
     bmi_value, bmi_category = compute_bmi(pi["height_cm"], pi["weight_kg"])
     st.metric("BMI (calculated)", "—" if bmi_value is None else str(bmi_value))
     st.caption(f"BMI category: {bmi_category}")
 
-    pi["consent"] = st.checkbox("I understand this is a prototype and not medical advice.", value=bool(pi["consent"]))
+    pi["consent"] = st.checkbox(
+        "I understand this is a prototype and not medical advice.",
+        value=bool(pi["consent"])
+    )
 
     st.markdown("---")
     st.subheader("2) Upload Medical Report")
 
     uploaded = st.file_uploader(
-        "Upload a PDF/JPG/PNG (e.g., CBC report)",
+        "Upload a PDF/JPG/PNG (e.g., glucose, lipid profile, diabetes or heart-related report)",
         type=["pdf", "jpg", "jpeg", "png"],
         help="File will be processed locally by the pipeline.",
     )
@@ -202,7 +216,6 @@ with tab_upload:
                     "type": uploaded.type,
                     "size_bytes": uploaded.size,
                     "selected_at": datetime.now().isoformat(timespec="seconds"),
-
                 }
             )
         else:
@@ -216,11 +229,11 @@ with tab_upload:
             st.caption("Waiting for upload")
         else:
             status = rec.get("status", "Unknown")
-            if status in {"Extracted"}:
+            if status == "Extracted":
                 st.progress(40)
-            elif status in {"Structured"}:
+            elif status == "Structured":
                 st.progress(70)
-            elif status in {"Scored"}:
+            elif status == "Scored":
                 st.progress(100)
             else:
                 st.progress(60)
@@ -230,27 +243,67 @@ with tab_upload:
 
     if run_btn and uploaded is not None:
         suffix = "." + uploaded.name.split(".")[-1].lower()
+
         with tempfile.TemporaryDirectory() as tmpdir:
             tmp_path = Path(tmpdir) / f"uploaded{suffix}"
             tmp_path.write_bytes(uploaded.getbuffer())
 
-            with st.spinner("Stage 1: Extracting text (PDF text → OCR fallback)"):
+            with st.spinner("Stage 1: Extracting text (PDF text → OCR fallback)..."):
                 rec = run_extraction_pipeline(str(tmp_path), poppler_path=poppler_path)
 
             if rec.get("status") == "Failed":
                 st.session_state.record = rec
-                st.session_state.cbc = None
+                st.session_state.indicators = None
                 st.session_state.risk = None
                 st.error("Extraction failed.")
                 st.code(rec.get("error", "Unknown error"))
             else:
-                with st.spinner("Stage 2: Parsing CBC indicators..."):
-                    cbc = extract_cbc_indicators(rec.get("raw_text", ""))
+                with st.spinner("Stage 2: Parsing diabetes and heart disease indicators..."):
+                    indicators = extract_disease_indicators(rec.get("raw_text", ""))
 
-                with st.spinner("Stage 3: Computing rule-based risk (prototype)..."):
-                    risk = compute_risk_from_cbc(cbc)
+                # Diabetes ML input mapping
+                glucose = indicators.get("glucose", {}).get("value")
 
-                # Attach structured inputs + BMI into the record (end-to-end)
+                # For Pima-style diabetes data, BloodPressure is closer to diastolic BP
+                blood_pressure = indicators.get("diastolic_bp", {}).get("value")
+
+                with st.spinner("Stage 3A: Running diabetes ML model..."):
+                    diabetes_result = predict_diabetes_risk(
+                        glucose=glucose,
+                        bmi=bmi_value,
+                        blood_pressure=blood_pressure,
+                        age=pi["age"],
+                    )
+
+                with st.spinner("Stage 3B: Computing heart disease rule-based estimate..."):
+                    rule_based_result = compute_diabetes_heart_risk(
+                        indicators,
+                        {
+                            "age": pi["age"],
+                            "sex": pi["sex"],
+                            "height_cm": pi["height_cm"],
+                            "weight_kg": pi["weight_kg"],
+                            "bmi": bmi_value,
+                            "bmi_category": bmi_category,
+                            "smoker": pi["smoker"],
+                            "family_history_diabetes": pi["family_history_diabetes"],
+                            "family_history_heart_disease": pi["family_history_heart_disease"],
+                            "symptoms": pi["symptoms"],
+                            "consent": pi["consent"],
+                        }
+                    )
+
+                risk = {
+                    "diabetes": diabetes_result,
+                    "heart": rule_based_result.get("heart", {}),
+                    "general_notes": [
+                        "Diabetes risk is generated using a trained machine learning model.",
+                        "Heart disease risk is currently generated using a rule-based approach.",
+                        "These outputs are informational and non-diagnostic.",
+                        "Discuss concerning results with a qualified healthcare professional.",
+                    ],
+                }
+
                 rec["patient_inputs"] = {
                     "age": pi["age"],
                     "sex": pi["sex"],
@@ -259,41 +312,46 @@ with tab_upload:
                     "bmi": bmi_value,
                     "bmi_category": bmi_category,
                     "smoker": pi["smoker"],
+                    "family_history_diabetes": pi["family_history_diabetes"],
+                    "family_history_heart_disease": pi["family_history_heart_disease"],
                     "symptoms": pi["symptoms"],
                     "consent": pi["consent"],
                 }
 
                 rec.setdefault("processed_indicators", {})
-                rec["processed_indicators"]["cbc"] = cbc
+                rec["processed_indicators"]["disease_indicators"] = indicators
                 rec["risk_result"] = risk
+                rec["model_used"] = {
+                    "diabetes": "rf_reduced_4_tuned.pkl",
+                    "heart": "rule_based_engine",
+                }
                 rec["status"] = "Scored"
 
                 st.session_state.record = rec
-                st.session_state.cbc = cbc
+                st.session_state.indicators = indicators
                 st.session_state.risk = risk
 
-                st.success("Done! Go to the Results tab to view patient inputs, CBC output, and risk summary.")
+                st.success("Done! Go to the Results tab to view structured indicators and risk summary.")
 
 # -------------------------
 # TAB 2: Results
 # -------------------------
-
 with tab_results:
     st.subheader("Results")
 
     rec = st.session_state.record
-    cbc = st.session_state.cbc
+    indicators = st.session_state.indicators
     risk = st.session_state.risk
 
     if rec is None:
-        st.info("No run yet. Go to Upload tab → fill inputs → upload a file → click Run.")
+        st.info("No run yet. Go to Upload → fill inputs → upload a file → click Run.")
     else:
         m1, m2, m3 = st.columns(3)
         m1.metric("Status", rec.get("status", ""))
         m2.metric("Patient ID", rec.get("patient_id", ""))
         m3.metric("Extracted chars", str(len(rec.get("raw_text", ""))))
 
-        st.markdown("### Patient Inputs (Saved with Record)")
+        st.markdown("### Patient Inputs")
         pi = rec.get("patient_inputs", {})
         p1, p2, p3, p4 = st.columns(4)
         p1.metric("Age", str(pi.get("age", "")))
@@ -301,40 +359,56 @@ with tab_results:
         p3.metric("BMI Category", str(pi.get("bmi_category", "")))
         p4.metric("Smoker", str(pi.get("smoker", "")))
 
-
-        st.markdown("### CBC Indicators")
-        if not cbc:
-            st.warning("No CBC fields detected. (This can happen if OCR/text format differs.)")
+        st.markdown("### Extracted Diabetes / Heart Indicators")
+        if not indicators:
+            st.warning("No diabetes or heart-related indicators detected.")
         else:
             rows = []
-            for name, v in cbc.items():
+            for name, v in indicators.items():
                 rows.append(
                     {
                         "Indicator": name,
                         "Value": v.get("value"),
-                        "Unit": v.get("unit") or "",
-                        "Reference": v.get("ref_raw") or "",
-                        "Flag": v.get("flag") or "",
+                        "Unit": v.get("unit", ""),
+                        "Reference": v.get("ref_raw", ""),
+                        "Flag": v.get("flag", ""),
                     }
                 )
             st.table(sorted(rows, key=lambda r: r["Indicator"]))
 
-        st.markdown("### Risk Summary (Rule-based Prototype)")
-        if not risk:
-            st.info("Risk score not available yet.")
-        else:
-            r1, r2, r3 = st.columns(3)
-            r1.metric("Risk Level", risk.get("risk_level", ""))
-            r2.metric("Risk Score", str(risk.get("risk_score", "")))
-            r3.metric("Abnormal Count", str(risk.get("abnormal_count", "")))
+        st.markdown("### Risk Summary")
 
-            st.markdown("**Why this result?**")
-            for reason in risk.get("reasons", []):
-                st.write(f"- {reason}")
+        if not risk:
+            st.info("Risk result not available yet.")
+        else:
+            st.markdown("#### Diabetes Risk (ML Model)")
+            d1, d2, d3 = st.columns(3)
+            d1.metric("Risk Level", risk.get("diabetes", {}).get("risk_level", ""))
+            d2.metric("Confidence Score", str(risk.get("diabetes", {}).get("confidence_score", "")))
+            d3.metric("Risk Score", str(risk.get("diabetes", {}).get("risk_score", "")))
+
+            st.markdown("**Contributing Indicators - Diabetes**")
+            for item in risk.get("diabetes", {}).get("reasons", []):
+                st.write(f"- {item}")
+
+            st.markdown("#### Heart Disease Risk (Rule-Based)")
+            h1, h2, h3 = st.columns(3)
+            h1.metric("Risk Level", risk.get("heart", {}).get("risk_level", ""))
+            h2.metric("Confidence Score", str(risk.get("heart", {}).get("confidence_score", "")))
+            h3.metric("Risk Score", str(risk.get("heart", {}).get("risk_score", "")))
+
+            st.markdown("**Contributing Indicators - Heart Disease**")
+            for item in risk.get("heart", {}).get("reasons", []):
+                st.write(f"- {item}")
 
             with st.expander("Recommendations / Notes"):
-                for tip in risk.get("recommendations", []):
+                for tip in risk.get("general_notes", []):
                     st.write(f"- {tip}")
+
+            st.warning(
+                "These outputs are informational and non-diagnostic. They are intended to support understanding "
+                "of possible risk indicators and should not replace professional medical evaluation."
+            )
 
         if show_raw_text:
             st.markdown("### Raw Extracted Text (Preview)")
@@ -357,11 +431,9 @@ with tab_export:
         st.download_button(
             "Download structured JSON",
             data=json_bytes,
-            file_name=f"{rec.get('patient_id','record')}_record.json",
+            file_name=f"{rec.get('patient_id', 'record')}_record.json",
             mime="application/json",
         )
 
         st.markdown("### JSON Preview")
-
         st.code(json.dumps(rec, indent=2), language="json")
-
