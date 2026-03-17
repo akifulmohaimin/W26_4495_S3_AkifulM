@@ -89,7 +89,7 @@ def plot_precision_recall(y_true, y_proba, title: str, out_name: str):
 def main():
     df = load_and_clean_data()
 
-    # Reduced feature set 
+    # Reduced feature set (deployment-aligned)
     for c in FEATURES_4:
         if c not in df.columns:
             raise ValueError(f"Missing required column '{c}' in dataset.")
@@ -97,13 +97,13 @@ def main():
     X = df[FEATURES_4].copy()
     y = df["Outcome"].astype(int)
 
-    # Training/Testing the split for fair evaluation + threshold study
+    # Train/Test split for fair evaluation + threshold study
     X_train, X_test, y_train, y_test = train_test_split(
         X, y, test_size=0.2, random_state=RANDOM_STATE, stratify=y
     )
 
     # -----------------------------
-    # Cross-validation (5-fold) – Baseline models
+    # Part A) Cross-validation (5-fold) – Baseline models
     # -----------------------------
     cv = StratifiedKFold(n_splits=5, shuffle=True, random_state=RANDOM_STATE)
 
@@ -166,17 +166,20 @@ def main():
     }
     save_json(tuning_summary, "reduced4_rf_tuning_summary.json")
 
-    # Saving the tuned model 
-
+    # Save tuned model (this is your best “complexity” artifact)
     tuned_model_path = os.path.join(MODEL_DIR, "rf_reduced_4_tuned.pkl")
     joblib.dump(best_rf, tuned_model_path)
+    joblib.dump(FEATURES_4, os.path.join(MODEL_DIR, "diabetes_feature_columns.pkl"))
+    joblib.dump(0.50, os.path.join(MODEL_DIR, "diabetes_threshold.pkl"))
+    
     print("Saved:", tuned_model_path)
+    print("Saved:", os.path.join(MODEL_DIR, "diabetes_feature_columns.pkl"))
+    print("Saved:", os.path.join(MODEL_DIR, "diabetes_threshold.pkl"))
 
     # -----------------------------
-    # Test-set evaluation + Threshold optimization
+    # Part C) Test-set evaluation + Threshold optimization
     # -----------------------------
-    # Fitting baseline RF and tuned RF on train, then evaluating on test
-
+    # Fit baseline RF and tuned RF on train, then evaluate on test
     rf_base.fit(X_train, y_train)
     base_proba = rf_base.predict_proba(X_test)[:, 1]
 
@@ -200,7 +203,7 @@ def main():
     threshold_df.to_csv(threshold_csv, index=False)
     print("Saved:", threshold_csv)
 
-    # Saving a compact JSON summary at default threshold 0.5
+    # Also save a compact JSON summary at default threshold 0.5
     test_eval = {
         "RF_baseline_t0.5": metrics_at_threshold(y_test.values, base_proba, 0.50),
         "RF_tuned_t0.5": metrics_at_threshold(y_test.values, tuned_proba, 0.50),
@@ -209,9 +212,8 @@ def main():
     save_json(test_eval, "reduced4_test_evaluation.json")
 
     # -----------------------------
-    # Visualizations (ROC + PR)
+    # Part D) Visualizations (ROC + PR)
     # -----------------------------
-
     plot_roc(y_test.values, base_proba, "ROC Curve - RF Baseline (Reduced 4)", "roc_rf_baseline_reduced4.png")
     plot_roc(y_test.values, tuned_proba, "ROC Curve - RF Tuned (Reduced 4)", "roc_rf_tuned_reduced4.png")
 
@@ -223,5 +225,4 @@ def main():
 
 
 if __name__ == "__main__":
-
     main()
