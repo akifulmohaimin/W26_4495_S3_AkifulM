@@ -1,19 +1,75 @@
 import json
+import os
 import tempfile
 from datetime import datetime
 from pathlib import Path
-from typing import Optional, Tuple
+from typing import Optional, Tuple, Dict, Any, List
 
+import altair as alt
+import pandas as pd
 import streamlit as st
+from dotenv import load_dotenv
+from openai import OpenAI
 
 from disease_pipeline import run_extraction_pipeline, extract_disease_indicators
 from diabetes_model_inference import predict_diabetes_risk
 from disease_risk_engine import compute_diabetes_heart_risk
 from authdb import init_db, create_user, verify_user
 
-st.set_page_config(page_title="CDSS Prototype - Diabetes ML + Heart Rule-Based", layout="wide")
+
+# ---------------------------------------------------
+# PAGE CONFIG
+# ---------------------------------------------------
+st.set_page_config(
+    page_title="CDSS Patient Health Portal",
+    layout="wide",
+    initial_sidebar_state="expanded",
+)
 
 init_db()
+load_dotenv()
+
+OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
+if not OPENAI_API_KEY:
+    try:
+        OPENAI_API_KEY = st.secrets.get("OPENAI_API_KEY", None)
+    except Exception:
+        OPENAI_API_KEY = None
+
+client = OpenAI(api_key=OPENAI_API_KEY) if OPENAI_API_KEY else None
+
+# ---------------------------------------------------
+# SESSION STATE
+# ---------------------------------------------------
+def init_session():
+    defaults = {
+        "logged_in": False,
+        "user_id": None,
+        "username": None,
+        "record": None,
+        "indicators": None,
+        "risk": None,
+        "chat_history": [],
+        "history": [],
+        "patient_inputs": {
+            "age": 25,
+            "sex": "Prefer not to say",
+            "height_cm": 170.0,
+            "weight_kg": 65.0,
+            "smoker": "No",
+            "family_history_diabetes": "No",
+            "family_history_heart_disease": "No",
+            "symptoms": [],
+            "consent": True,
+        },
+    }
+    for k, v in defaults.items():
+        if k not in st.session_state:
+            st.session_state[k] = v
+
+
+init_session()
+
 
 
 def logout():
