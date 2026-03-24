@@ -626,6 +626,77 @@ def render_sidebar_export():
         mime="application/json",
         use_container_width=True,
     )
+
+def build_history_entry(record: Dict[str, Any], indicators: Dict[str, Any], risk: Dict[str, Any]) -> Dict[str, Any]:
+    return {
+        "timestamp": datetime.now().isoformat(timespec="seconds"),
+        "patient_id": record.get("patient_id", ""),
+        "bmi": record.get("patient_inputs", {}).get("bmi"),
+        "glucose": indicators.get("glucose", {}).get("value"),
+        "hba1c": indicators.get("hba1c", {}).get("value"),
+        "systolic_bp": indicators.get("systolic_bp", {}).get("value"),
+        "diastolic_bp": indicators.get("diastolic_bp", {}).get("value"),
+        "cholesterol_total": indicators.get("cholesterol_total", {}).get("value"),
+        "ldl": indicators.get("ldl", {}).get("value"),
+        "diabetes_risk": risk.get("diabetes", {}).get("risk_level"),
+        "heart_risk": risk.get("heart", {}).get("risk_level"),
+    }
+
+
+def compare_with_previous(history: List[Dict[str, Any]]) -> Dict[str, Any]:
+    if len(history) < 2:
+        return {}
+
+    current = history[-1]
+    previous = history[-2]
+
+    def delta(key):
+        curr = to_float(current.get(key))
+        prev = to_float(previous.get(key))
+        if curr is None or prev is None:
+            return None
+        return round(curr - prev, 1)
+
+    return {
+        "glucose_delta": delta("glucose"),
+        "systolic_bp_delta": delta("systolic_bp"),
+        "bmi_delta": delta("bmi"),
+        "previous_time": previous.get("timestamp"),
+    }
+
+
+def comparison_card(title: str, delta_value: Optional[float], better_when_lower: bool = True):
+    if delta_value is None:
+        text = "No previous report"
+        color = "#64748b"
+    elif delta_value == 0:
+        text = "➖ No change"
+        color = "#64748b"
+    else:
+        improved = delta_value < 0 if better_when_lower else delta_value > 0
+        color = "#10b981" if improved else "#ef4444"
+        icon = "⬇️" if delta_value < 0 else "⬆️"
+        text = f"{icon} {abs(delta_value)}"
+
+    st.markdown(
+        f"""
+        <div style="
+            background:#ffffff;
+            border:1px solid #dbe7f0;
+            border-radius:16px;
+            padding:14px 16px;
+            box-shadow:0 6px 18px rgba(15,23,42,0.05);
+        ">
+            <div style="font-size:0.9rem;color:#64748b;margin-bottom:6px;">{title}</div>
+            <div style="font-size:1.4rem;font-weight:800;color:{color};margin-bottom:4px;">{text}</div>
+            <div style="font-size:0.82rem;color:#64748b;">Compared with previous report</div>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+
+
+
 def render_trend_chart(history: List[Dict[str, Any]], field: str, label: str):
     if not history:
         st.info(f"No data yet for {label}.")
