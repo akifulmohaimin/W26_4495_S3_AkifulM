@@ -207,8 +207,10 @@ apply_custom_css()
 
 
 
+# ---------------------------------------------------
+# HELPERS
+# ---------------------------------------------------
 def compute_bmi(height_cm: float, weight_kg: float) -> Tuple[Optional[float], str]:
-    """Returns (bmi_value, bmi_category)."""
     if height_cm <= 0 or weight_kg <= 0:
         return None, "Invalid"
 
@@ -216,101 +218,388 @@ def compute_bmi(height_cm: float, weight_kg: float) -> Tuple[Optional[float], st
     bmi = weight_kg / (height_m ** 2)
 
     if bmi < 18.5:
-        cat = "Underweight"
+        category = "Underweight"
     elif bmi < 25:
-        cat = "Normal"
+        category = "Normal"
     elif bmi < 30:
-        cat = "Overweight"
+        category = "Overweight"
     else:
-        cat = "Obese"
+        category = "Obese"
 
-    return round(bmi, 1), cat
-
-
-st.title("CDSS - Patient Portal")
-
-if not st.session_state["logged_in"]:
-    tab1, tab2 = st.tabs(["Login", "Register"])
-
-    with tab1:
-        st.subheader("Login")
-        u = st.text_input("Username", key="login_user")
-        p = st.text_input("Password", type="password", key="login_pass")
-        if st.button("Login"):
-            ok, user_id = verify_user(u, p)
-            if ok:
-                st.session_state["logged_in"] = True
-                st.session_state["user_id"] = user_id
-                st.session_state["username"] = u.strip().lower()
-                st.success("Logged in!")
-                st.rerun()
-            else:
-                st.error("Invalid username or password.")
-
-    with tab2:
-        st.subheader("Register")
-        u2 = st.text_input("Username", key="reg_user")
-        p2 = st.text_input("Password", type="password", key="reg_pass")
-        if st.button("Create account"):
-            ok, msg = create_user(u2, p2)
-            (st.success if ok else st.error)(msg)
-
-    st.stop()
+    return round(bmi, 1), category
 
 
-# -------------------------
-# Protected area
-# -------------------------
-st.sidebar.write(f"Logged in as: **{st.session_state['username']}**")
-if st.sidebar.button("Logout"):
-    logout()
-    st.rerun()
+def to_float(value, default=None):
+    try:
+        if value in [None, "", "—"]:
+            return default
+        return float(value)
+    except Exception:
+        return default
 
 
-# -------------------------
-# Page setup
-# -------------------------
-st.title("Clinical Decision Support System (CDSS) — Prototype")
-st.caption("Upload → Extract → Parse indicators → Diabetes ML prediction + Heart rule-based estimate → Export JSON")
+def get_status_color(level: str) -> str:
+    level = (level or "").lower()
+    if "high" in level or "attention" in level:
+        return "#ef4444"
+    if "moderate" in level or "monitor" in level:
+        return "#f59e0b"
+    if "low" in level or "stable" in level:
+        return "#10b981"
+    return "#64748b"
 
-with st.expander("Disclaimer", expanded=True):
-    st.warning(
-        "This is for CSIS-4495 (Applied Research Project Course). Not medical advice. Not a diagnosis. "
-        "OCR/extraction accuracy depends on report format and scan quality."
+
+def metric_card(title: str, value: str, subtitle: str = "", color: str = "#2563eb", icon: str = "📌"):
+    st.markdown(
+        f"""
+        <div style="
+            background: linear-gradient(135deg, {color}14, #ffffff);
+            border: 1px solid {color}28;
+            border-radius: 18px;
+            padding: 18px 18px 14px 18px;
+            box-shadow: 0 8px 22px rgba(15, 23, 42, 0.06);
+            min-height: 118px;
+        ">
+            <div style="font-size: 0.9rem; color: #64748b; margin-bottom: 8px;">{icon} {title}</div>
+            <div style="font-size: 1.9rem; font-weight: 800; color: #0f172a; margin-bottom: 4px;">{value}</div>
+            <div style="font-size: 0.88rem; color: #64748b;">{subtitle}</div>
+        </div>
+        """,
+        unsafe_allow_html=True,
     )
 
-st.sidebar.header("Settings (Optional)")
-poppler_path = st.sidebar.text_input(
-    "Poppler path (Windows only, optional)",
-    value="",
-    help="If pdf2image fails on Windows, install Poppler and paste its /bin path here.",
-).strip() or None
 
-st.sidebar.markdown("---")
-show_raw_text = st.sidebar.checkbox("Show raw extracted text", value=True)
-raw_preview_chars = st.sidebar.slider("Raw text preview length", 500, 12000, 6000, step=500)
+def info_card(title: str, body: str, color: str = "#0ea5e9", icon: str = "ℹ️"):
+    st.markdown(
+        f"""
+        <div style="
+            background: #ffffff;
+            border-left: 6px solid {color};
+            border-radius: 16px;
+            padding: 14px 16px;
+            box-shadow: 0 8px 22px rgba(15, 23, 42, 0.06);
+            margin-bottom: 12px;
+        ">
+            <div style="font-weight: 800; color: #0f172a; margin-bottom: 6px;">{icon} {title}</div>
+            <div style="color: #334155; line-height: 1.55;">{body}</div>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
 
-tab_upload, tab_results, tab_export = st.tabs(["Upload", "Results", "Export"])
 
-if "record" not in st.session_state:
-    st.session_state.record = None
-if "indicators" not in st.session_state:
-    st.session_state.indicators = None
-if "risk" not in st.session_state:
-    st.session_state.risk = None
-if "patient_inputs" not in st.session_state:
-    st.session_state.patient_inputs = {
-        "age": 25,
-        "sex": "Prefer not to say",
-        "height_cm": 170.0,
-        "weight_kg": 65.0,
-        "smoker": "No",
-        "family_history_diabetes": "No",
-        "family_history_heart_disease": "No",
-        "symptoms": [],
-        "consent": True,
+def compact_pills(items: List[str]):
+    if not items:
+        return
+    html = "".join([f'<span class="mini-pill">{item}</span>' for item in items])
+    st.markdown(html, unsafe_allow_html=True)
+
+
+def extract_key_indicator_cards(indicators: Dict[str, Dict[str, Any]]):
+    if not indicators:
+        st.info("No disease indicators detected yet.")
+        return
+
+    priority_order = [
+        "glucose",
+        "hba1c",
+        "systolic_bp",
+        "diastolic_bp",
+        "cholesterol_total",
+        "ldl",
+        "hdl",
+        "triglycerides",
+    ]
+
+    available = [k for k in priority_order if k in indicators]
+    fallback = [k for k in indicators.keys() if k not in available]
+    selected = (available + fallback)[:4]
+
+    cols = st.columns(len(selected))
+    for col, key in zip(cols, selected):
+        item = indicators.get(key, {})
+        flag = str(item.get("flag", "") or "Normal")
+        value = item.get("value", "—")
+        unit = item.get("unit", "")
+        ref = item.get("ref_raw", "")
+        flag_color = (
+            "#ef4444" if flag.lower() == "high"
+            else "#f59e0b" if flag.lower() not in ["normal", ""]
+            else "#10b981"
+        )
+
+        with col:
+            st.markdown(
+                f"""
+                <div style="
+                    background:#ffffff;
+                    border:1px solid #dbe7f0;
+                    border-radius:18px;
+                    padding:18px;
+                    box-shadow: 0 8px 22px rgba(15, 23, 42, 0.06);
+                    min-height: 160px;
+                ">
+                    <div style="font-size:0.92rem; color:#64748b; margin-bottom:10px;">🧪 {key.replace('_', ' ').title()}</div>
+                    <div style="font-size:1.8rem; font-weight:800; color:#0f172a;">{value} {unit}</div>
+                    <div style="margin:12px 0;">
+                        <span style="
+                            background:{flag_color}15;
+                            color:{flag_color};
+                            border:1px solid {flag_color}35;
+                            border-radius:999px;
+                            padding:6px 12px;
+                            font-size:0.8rem;
+                            font-weight:700;
+                        ">{flag}</span>
+                    </div>
+                    <div style="font-size:0.82rem; color:#64748b;">Reference: {ref if ref else "Not available"}</div>
+                </div>
+                """,
+                unsafe_allow_html=True,
+            )
+
+
+def generate_lifestyle_recommendations(
+    risk: Dict[str, Any],
+    patient_inputs: Dict[str, Any],
+    indicators: Dict[str, Dict[str, Any]],
+) -> Dict[str, List[str]]:
+    diabetes = risk.get("diabetes", {})
+    heart = risk.get("heart", {})
+    bmi = patient_inputs.get("bmi")
+    smoker = patient_inputs.get("smoker", "No")
+    symptoms = patient_inputs.get("symptoms", [])
+
+    recs = {
+        "Food": [],
+        "Activity": [],
+        "Daily Habits": [],
+        "Follow-Up": [],
     }
 
+    if bmi is not None and bmi >= 25:
+        recs["Food"].append("Reduce sugary drinks and processed snacks.")
+        recs["Activity"].append("Aim for 30 minutes of walking most days.")
+
+    if diabetes.get("risk_level", "").lower() in ["moderate", "high"]:
+        recs["Food"].append("Choose higher-fiber meals and steadier meal timing.")
+        recs["Follow-Up"].append("Discuss follow-up blood sugar testing.")
+
+    if heart.get("risk_level", "").lower() in ["moderate", "high"]:
+        recs["Food"].append("Limit salty and heavily processed foods.")
+        recs["Daily Habits"].append("Track blood pressure regularly.")
+
+    if smoker == "Yes":
+        recs["Daily Habits"].append("Cutting down smoking would strongly help heart health.")
+
+    if "Chest pain" in symptoms or "Shortness of breath" in symptoms:
+        recs["Follow-Up"].append("Discuss chest pain or breathing symptoms promptly.")
+
+    glucose_flag = str(indicators.get("glucose", {}).get("flag", "")).lower()
+    if glucose_flag == "high":
+        recs["Food"].append("Reduce added sugar and watch portions.")
+
+    if patient_inputs.get("family_history_diabetes") == "Yes":
+        recs["Follow-Up"].append("Family history makes regular diabetes screening important.")
+
+    if patient_inputs.get("family_history_heart_disease") == "Yes":
+        recs["Follow-Up"].append("Family history makes heart check-ups more important.")
+
+    if not recs["Activity"]:
+        recs["Activity"].append("Stay active with walking, stretching, or moderate exercise.")
+    if not recs["Daily Habits"]:
+        recs["Daily Habits"].append("Prioritize sleep, hydration, and stress management.")
+    if not recs["Follow-Up"]:
+        recs["Follow-Up"].append("Use this report as a discussion aid, not a diagnosis.")
+
+    return recs
+
+
+def generate_priorities(risk: Dict[str, Any], indicators: Dict[str, Dict[str, Any]]) -> List[str]:
+    priorities = []
+
+    diabetes_level = str(risk.get("diabetes", {}).get("risk_level", "")).lower()
+    heart_level = str(risk.get("heart", {}).get("risk_level", "")).lower()
+
+    if diabetes_level in ["high", "moderate"]:
+        priorities.append("Focus on blood sugar.")
+
+    if heart_level in ["high", "moderate"]:
+        priorities.append("Improve blood pressure and cholesterol.")
+
+    if str(indicators.get("ldl", {}).get("flag", "")).lower() == "high":
+        priorities.append("Work on lowering LDL cholesterol.")
+
+    if str(indicators.get("hdl", {}).get("flag", "")).lower() == "low":
+        priorities.append("Support heart health through activity.")
+
+    if not priorities:
+        priorities.append("Keep healthy habits and keep monitoring.")
+
+    return priorities[:3]
+
+
+def generate_doctor_questions(risk: Dict[str, Any], indicators: Dict[str, Dict[str, Any]]) -> List[str]:
+    questions = []
+
+    if str(risk.get("diabetes", {}).get("risk_level", "")).lower() in ["moderate", "high"]:
+        questions.append("Should I repeat my blood sugar or HbA1c test?")
+
+    if str(risk.get("heart", {}).get("risk_level", "")).lower() in ["moderate", "high"]:
+        questions.append("Do these BP and cholesterol values need follow-up?")
+
+    if str(indicators.get("glucose", {}).get("flag", "")).lower() == "high":
+        questions.append("Could this suggest prediabetes or diabetes risk?")
+
+    if str(indicators.get("cholesterol_total", {}).get("flag", "")).lower() == "high" or str(indicators.get("ldl", {}).get("flag", "")).lower() == "high":
+        questions.append("What lifestyle changes should I start with?")
+
+    if not questions:
+        questions.append("Are any follow-up tests needed based on this report?")
+
+    return questions[:3]
+
+
+def overall_health_summary(risk: Dict[str, Any]) -> Tuple[str, str]:
+    diabetes_level = (risk.get("diabetes", {}).get("risk_level", "") or "").lower()
+    heart_level = (risk.get("heart", {}).get("risk_level", "") or "").lower()
+
+    if "high" in [diabetes_level, heart_level]:
+        return "Needs Attention", "Some findings may need closer follow-up."
+    if "moderate" in [diabetes_level, heart_level]:
+        return "Monitor Closely", "A few indicators deserve attention."
+    if "low" in [diabetes_level, heart_level]:
+        return "Generally Stable", "No major risk signal appears dominant."
+    return "No Analysis Yet", "Upload a report and run the pipeline."
+
+
+def patient_friendly_explanation(risk: Dict[str, Any]) -> str:
+    diabetes = risk.get("diabetes", {})
+    heart = risk.get("heart", {})
+    d_level = diabetes.get("risk_level", "unknown")
+    h_level = heart.get("risk_level", "unknown")
+
+    return (
+        f"Your report suggests {str(d_level).lower()} diabetes risk and "
+        f"{str(h_level).lower()} heart risk. This is an informational summary."
+    )
+
+
+def build_patient_context(rec: Dict[str, Any], indicators: Dict[str, Any], risk: Dict[str, Any]) -> str:
+    patient_inputs = rec.get("patient_inputs", {}) if rec else {}
+
+    indicator_lines = []
+    for name, item in (indicators or {}).items():
+        indicator_lines.append(
+            f"- {name}: value={item.get('value')}, unit={item.get('unit', '')}, "
+            f"flag={item.get('flag', '')}, reference={item.get('ref_raw', '')}"
+        )
+
+    diabetes = risk.get("diabetes", {}) if risk else {}
+    heart = risk.get("heart", {}) if risk else {}
+
+    return f"""
+Patient profile:
+- Age: {patient_inputs.get('age')}
+- Sex: {patient_inputs.get('sex')}
+- BMI: {patient_inputs.get('bmi')}
+- BMI Category: {patient_inputs.get('bmi_category')}
+- Smoker: {patient_inputs.get('smoker')}
+- Family History Diabetes: {patient_inputs.get('family_history_diabetes')}
+- Family History Heart Disease: {patient_inputs.get('family_history_heart_disease')}
+- Symptoms: {patient_inputs.get('symptoms', [])}
+
+Extracted indicators:
+{chr(10).join(indicator_lines)}
+
+Risk outputs:
+- Diabetes Risk Level: {diabetes.get('risk_level')}
+- Diabetes Confidence: {diabetes.get('confidence_score')}
+- Diabetes Risk Score: {diabetes.get('risk_score')}
+- Diabetes Reasons: {diabetes.get('reasons', [])}
+- Heart Risk Level: {heart.get('risk_level')}
+- Heart Confidence: {heart.get('confidence_score')}
+- Heart Risk Score: {heart.get('risk_score')}
+- Heart Reasons: {heart.get('reasons', [])}
+""".strip()
+
+
+def ask_llm_about_report(
+    question: str,
+    rec: Dict[str, Any],
+    indicators: Dict[str, Any],
+    risk: Dict[str, Any],
+) -> str:
+    if client is None:
+        return (
+            "AI chat is not configured yet. Add your API key in a .env file or Streamlit secrets. "
+            "The rest of the app will still work normally."
+        )
+
+    context = build_patient_context(rec, indicators, risk)
+
+    system_prompt = """
+You are a patient-friendly health report explainer inside a Clinical Decision Support System prototype.
+
+Your job:
+- Explain results in simple, calm, clear language.
+- Help the patient understand indicators, risk summaries, and lifestyle guidance.
+- Keep answers concise, practical, and non-technical when possible.
+
+Rules:
+- Do not diagnose.
+- Do not say the patient definitely has a disease.
+- Do not prescribe medication.
+- Do not replace a doctor.
+- Use cautious language such as: "may indicate", "can be associated with", "suggests", "may deserve follow-up".
+- Avoid definitive claims.
+- If serious symptoms appear such as chest pain, shortness of breath, or severe dizziness, advise prompt medical attention.
+- Mention that the app is informational and non-diagnostic when relevant.
+- Focus on: what it means, why it matters, what to do next.
+- Use short paragraphs or bullets.
+- Keep answers shorter than 120 words unless the user asks for more detail.
+"""
+
+    user_prompt = f"""
+Here is the patient's app context:
+
+{context}
+
+Patient question:
+{question}
+
+Answer in simple language for a non-clinical user.
+"""
+
+    try:
+        response = client.chat.completions.create(
+            model="gpt-4.1-mini",
+            temperature=0.4,
+            messages=[
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": user_prompt},
+            ],
+        )
+        return response.choices[0].message.content.strip()
+    except Exception as e:
+        return f"AI response failed: {e}"
+
+
+def render_sidebar_export():
+    rec = st.session_state.record
+    if rec is None:
+        st.caption("No structured output available yet.")
+        return
+
+    st.caption("Available for project/demo use.")
+    json_bytes = json.dumps(rec, indent=2).encode("utf-8")
+    st.download_button(
+        "Download structured JSON",
+        data=json_bytes,
+        file_name=f"{rec.get('patient_id', 'record')}_record.json",
+        mime="application/json",
+        use_container_width=True,
+    )
 # -------------------------
 # TAB 1: Upload
 # -------------------------
