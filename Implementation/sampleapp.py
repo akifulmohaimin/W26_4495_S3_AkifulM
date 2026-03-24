@@ -76,12 +76,135 @@ def logout():
     st.session_state["logged_in"] = False
     st.session_state["user_id"] = None
     st.session_state["username"] = None
+    st.session_state["record"] = None
+    st.session_state["indicators"] = None
+    st.session_state["risk"] = None
+    st.session_state["chat_history"] = []
+    st.session_state["history"] = []
+
+# ---------------------------------------------------
+# STYLING
+# ---------------------------------------------------
+def apply_custom_css():
+    st.markdown(
+        """
+        <style>
+            .stApp {
+                background: #f7f9fc;
+                color: #0f172a;
+            }
+
+            .main .block-container {
+                padding-top: 1.2rem;
+                padding-bottom: 2rem;
+                max-width: 1250px;
+            }
+
+            header[data-testid="stHeader"] {
+                background: transparent;
+            }
+
+            #MainMenu {visibility: hidden;}
+            footer {visibility: hidden;}
+
+            section[data-testid="stSidebar"] {
+                background: #eef4f8;
+                border-right: 1px solid #d9e4ec;
+            }
+
+            h1, h2, h3, h4 {
+                color: #0f172a !important;
+                font-weight: 800 !important;
+            }
+
+            p, label {
+                color: #334155 !important;
+            }
+
+            .stButton > button {
+                background: #eb6757 !important;
+                color: white !important;
+                border: none !important;
+                border-radius: 12px !important;
+                font-weight: 700 !important;
+                box-shadow: 0 4px 12px rgba(235, 103, 87, 0.18);
+            }
+
+            .stButton > button:hover {
+                background: #de5747 !important;
+                color: white !important;
+            }
+
+            section[data-testid="stSidebar"] .stButton > button {
+                background: #ffffff !important;
+                color: #0f172a !important;
+                border: 1px solid #d7e2ea !important;
+                box-shadow: none !important;
+            }
+
+            div[data-testid="stMetric"] {
+                background: #ffffff;
+                border: 1px solid #dbe7f0;
+                border-radius: 16px;
+                padding: 12px;
+                box-shadow: 0 4px 14px rgba(15, 23, 42, 0.05);
+            }
+
+            div[data-testid="stAlert"] {
+                border-radius: 14px !important;
+            }
+
+            .mini-pill {
+                display: inline-block;
+                padding: 6px 12px;
+                border-radius: 999px;
+                font-size: 0.82rem;
+                font-weight: 700;
+                margin-right: 8px;
+                margin-bottom: 8px;
+                border: 1px solid #d7e2ea;
+                background: #ffffff;
+                color: #334155;
+            }
+
+            .small-muted {
+                color: #64748b !important;
+                font-size: 0.92rem;
+            }
+
+            div[data-testid="stCheckbox"] label {
+                color: #0f172a !important;
+                font-weight: 500 !important;
+            }
+
+            div[data-testid="stCheckbox"] p {
+                color: #0f172a !important;
+                font-size: 0.95rem !important;
+            }
+
+            div[data-testid="stChatMessage"] {
+                background: #ffffff;
+                border: 1px solid #dbe7f0;
+                border-radius: 16px;
+                padding: 10px 12px;
+            }
+
+            button[data-baseweb="tab"] {
+                color: #334155 !important;
+                font-weight: 600 !important;
+            }
+
+            button[data-baseweb="tab"][aria-selected="true"] {
+                color: #dc2626 !important;
+            }
+        </style>
+        """,
+        unsafe_allow_html=True,
+    )
 
 
-if "logged_in" not in st.session_state:
-    st.session_state["logged_in"] = False
-    st.session_state["user_id"] = None
-    st.session_state["username"] = None
+apply_custom_css()
+
 
 
 def compute_bmi(height_cm: float, weight_kg: float) -> Tuple[Optional[float], str]:
