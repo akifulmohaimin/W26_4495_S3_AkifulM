@@ -205,6 +205,32 @@ def apply_custom_css():
 
 apply_custom_css()
 
+# ---------------------------------------------------
+# FILE-BASED HISTORY
+# ---------------------------------------------------
+HISTORY_DIR = Path("history")
+HISTORY_DIR.mkdir(exist_ok=True)
+
+
+def get_history_path(username: str) -> Path:
+    safe_name = username.replace(" ", "_").replace("/", "_")
+    return HISTORY_DIR / f"{safe_name}_history.json"
+
+
+def load_user_history(username: str) -> List[Dict[str, Any]]:
+    path = get_history_path(username)
+    if not path.exists():
+        return []
+    try:
+        return json.loads(path.read_text(encoding="utf-8"))
+    except Exception:
+        return []
+
+
+def save_user_history(username: str, history: List[Dict[str, Any]]) -> None:
+    path = get_history_path(username)
+    path.write_text(json.dumps(history, indent=2), encoding="utf-8")
+
 
 
 # ---------------------------------------------------
