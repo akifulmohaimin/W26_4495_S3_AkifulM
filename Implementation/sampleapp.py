@@ -600,206 +600,317 @@ def render_sidebar_export():
         mime="application/json",
         use_container_width=True,
     )
-# -------------------------
-# TAB 1: Upload
-# -------------------------
-with tab_upload:
-    st.subheader("1) Patient Inputs (Structured)")
+def render_trend_chart(history: List[Dict[str, Any]], field: str, label: str):
+    if not history:
+        st.info(f"No data yet for {label}.")
+        return
 
-    pi = st.session_state.patient_inputs
-
-    c1, c2, c3 = st.columns(3)
-
-    with c1:
-        pi["age"] = st.number_input("Age", min_value=0, max_value=120, value=int(pi["age"]))
-        pi["sex"] = st.selectbox(
-            "Sex",
-            ["Prefer not to say", "Female", "Male", "Other"],
-            index=["Prefer not to say", "Female", "Male", "Other"].index(pi["sex"]),
-        )
-
-    with c2:
-        pi["height_cm"] = st.number_input(
-            "Height (cm)", min_value=50.0, max_value=250.0, value=float(pi["height_cm"]), step=0.5
-        )
-        pi["weight_kg"] = st.number_input(
-            "Weight (kg)", min_value=10.0, max_value=300.0, value=float(pi["weight_kg"]), step=0.5
-        )
-
-    with c3:
-        pi["smoker"] = st.selectbox("Smoker", ["No", "Yes"], index=["No", "Yes"].index(pi["smoker"]))
-        pi["family_history_diabetes"] = st.selectbox(
-            "Family History - Diabetes",
-            ["No", "Yes"],
-            index=["No", "Yes"].index(pi["family_history_diabetes"]),
-        )
-        pi["family_history_heart_disease"] = st.selectbox(
-            "Family History - Heart Disease",
-            ["No", "Yes"],
-            index=["No", "Yes"].index(pi["family_history_heart_disease"]),
-        )
-
-    pi["symptoms"] = st.multiselect(
-        "Symptoms (optional)",
-        [
-            "Fatigue",
-            "Frequent urination",
-            "Increased thirst",
-            "Blurred vision",
-            "Chest pain",
-            "Shortness of breath",
-            "Dizziness",
-            "Palpitations",
-            "Other",
-        ],
-        default=pi["symptoms"],
-    )
-
-    bmi_value, bmi_category = compute_bmi(pi["height_cm"], pi["weight_kg"])
-    st.metric("BMI (calculated)", "—" if bmi_value is None else str(bmi_value))
-    st.caption(f"BMI category: {bmi_category}")
-
-    pi["consent"] = st.checkbox(
-        "I understand this is a prototype and not medical advice.",
-        value=bool(pi["consent"])
-    )
-
-    st.markdown("---")
-    st.subheader("2) Upload Medical Report")
-
-    uploaded = st.file_uploader(
-        "Upload a PDF/JPG/PNG (e.g., glucose, lipid profile, diabetes or heart-related report)",
-        type=["pdf", "jpg", "jpeg", "png"],
-        help="File will be processed locally by the pipeline.",
-    )
-
-    col1, col2 = st.columns([2, 1])
-
-    with col1:
-        if uploaded:
-            st.success(f"Selected file: {uploaded.name}")
-            st.json(
+    rows = []
+    for item in history:
+        value = to_float(item.get(field))
+        if value is not None:
+            rows.append(
                 {
-                    "filename": uploaded.name,
-                    "type": uploaded.type,
-                    "size_bytes": uploaded.size,
-                    "selected_at": datetime.now().isoformat(timespec="seconds"),
+                    "date": item.get("timestamp", "")[:10],
+                    "value": value,
                 }
             )
-        else:
-            st.info("Choose a file to run extraction.")
 
-    with col2:
-        st.markdown("### Pipeline Status")
-        rec = st.session_state.record
-        if rec is None:
-            st.progress(10)
-            st.caption("Waiting for upload")
-        else:
-            status = rec.get("status", "Unknown")
-            if status == "Extracted":
-                st.progress(40)
-            elif status == "Structured":
-                st.progress(70)
-            elif status == "Scored":
-                st.progress(100)
+    if not rows:
+        st.info(f"No valid values yet for {label}.")
+        return
+
+    df = pd.DataFrame(rows)
+    df = df.groupby("date", as_index=False).last()
+
+    chart = (
+        alt.Chart(df)
+        .mark_line(point=True, strokeWidth=3)
+        .encode(
+            x=alt.X("date:N", title="Date"),
+            y=alt.Y("value:Q", title=label),
+            tooltip=["date", "value"],
+        )
+        .properties(
+            height=220,
+            background="white",
+        )
+        .configure_view(strokeWidth=0)
+        .configure_axis(
+            labelColor="#334155",
+            titleColor="#0f172a",
+            gridColor="#e2e8f0",
+        )
+    )
+
+    st.altair_chart(chart, use_container_width=True)
+
+
+# ---------------------------------------------------
+# AUTH
+# ---------------------------------------------------
+st.markdown("## CDSS — Patient Health Portal")
+st.caption("Understand your report, key indicators, trends, and next steps in one place.")
+
+if not st.session_state["logged_in"]:
+    login_tab, register_tab = st.tabs(["Login", "Register"])
+
+    with login_tab:
+        st.subheader("Login")
+        u = st.text_input("Username", key="login_user")
+        p = st.text_input("Password", type="password", key="login_pass")
+
+        if st.button("Login", use_container_width=True):
+            ok, user_id = verify_user(u, p)
+            if ok:
+                st.session_state["logged_in"] = True
+                st.session_state["user_id"] = user_id
+                st.session_state["username"] = u.strip().lower()
+                st.session_state["history"] = load_user_history(st.session_state["username"])
+                st.success("Logged in successfully.")
+                st.rerun()
             else:
-                st.progress(60)
-            st.caption(f"Last run: {status}")
+                st.error("Invalid username or password.")
 
-    run_btn = st.button("Run Pipeline", type="primary", disabled=(uploaded is None))
+    with register_tab:
+        st.subheader("Create account")
+        u2 = st.text_input("New username", key="reg_user")
+        p2 = st.text_input("New password", type="password", key="reg_pass")
 
-    if run_btn and uploaded is not None:
-        suffix = "." + uploaded.name.split(".")[-1].lower()
+        if st.button("Create account", use_container_width=True):
+            ok, msg = create_user(u2, p2)
+            (st.success if ok else st.error)(msg)
 
-        with tempfile.TemporaryDirectory() as tmpdir:
-            tmp_path = Path(tmpdir) / f"uploaded{suffix}"
-            tmp_path.write_bytes(uploaded.getbuffer())
+    st.stop()
 
-            with st.spinner("Stage 1: Extracting text (PDF text → OCR fallback)..."):
-                rec = run_extraction_pipeline(str(tmp_path), poppler_path=poppler_path)
 
-            if rec.get("status") == "Failed":
-                st.session_state.record = rec
-                st.session_state.indicators = None
-                st.session_state.risk = None
-                st.error("Extraction failed.")
-                st.code(rec.get("error", "Unknown error"))
-            else:
-                with st.spinner("Stage 2: Parsing diabetes and heart disease indicators..."):
-                    indicators = extract_disease_indicators(rec.get("raw_text", ""))
+if st.session_state["logged_in"] and not st.session_state["history"]:
+    st.session_state["history"] = load_user_history(st.session_state["username"])
 
-                # Diabetes ML input mapping
-                glucose = indicators.get("glucose", {}).get("value")
 
-                # For Pima-style diabetes data, BloodPressure is closer to diastolic BP
-                blood_pressure = indicators.get("diastolic_bp", {}).get("value")
+# ---------------------------------------------------
+# SIDEBAR
+# ---------------------------------------------------
+with st.sidebar:
+    st.markdown(f"### 👋 Welcome, {st.session_state['username']}")
 
-                with st.spinner("Stage 3A: Running diabetes ML model..."):
-                    diabetes_result = predict_diabetes_risk(
-                        glucose=glucose,
-                        bmi=bmi_value,
-                        blood_pressure=blood_pressure,
-                        age=pi["age"],
-                    )
+    if st.button("Logout", use_container_width=True):
+        logout()
+        st.rerun()
 
-                with st.spinner("Stage 3B: Computing heart disease rule-based estimate..."):
-                    rule_based_result = compute_diabetes_heart_risk(
-                        indicators,
-                        {
-                            "age": pi["age"],
-                            "sex": pi["sex"],
-                            "height_cm": pi["height_cm"],
-                            "weight_kg": pi["weight_kg"],
-                            "bmi": bmi_value,
-                            "bmi_category": bmi_category,
-                            "smoker": pi["smoker"],
-                            "family_history_diabetes": pi["family_history_diabetes"],
-                            "family_history_heart_disease": pi["family_history_heart_disease"],
-                            "symptoms": pi["symptoms"],
-                            "consent": pi["consent"],
-                        }
-                    )
+    st.markdown("---")
+    st.markdown("### 🤖 AI Status")
+    if client:
+        st.success("AI chat connected")
+    else:
+        st.warning("AI chat not configured")
 
-                risk = {
-                    "diabetes": diabetes_result,
-                    "heart": rule_based_result.get("heart", {}),
-                    "general_notes": [
-                        "Diabetes risk is generated using a trained machine learning model.",
-                        "Heart disease risk is currently generated using a rule-based approach.",
-                        "These outputs are informational and non-diagnostic.",
-                        "Discuss concerning results with a qualified healthcare professional.",
-                    ],
-                }
+    st.markdown("---")
+    st.markdown("### 📌 Quick View")
+    hist = st.session_state["history"]
+    st.write(f"Past reports saved: **{len(hist)}**")
+    if st.session_state["risk"]:
+        st.write(f"Latest diabetes risk: **{st.session_state['risk'].get('diabetes', {}).get('risk_level', '—')}**")
+        st.write(f"Latest heart risk: **{st.session_state['risk'].get('heart', {}).get('risk_level', '—')}**")
 
-                rec["patient_inputs"] = {
-                    "age": pi["age"],
-                    "sex": pi["sex"],
-                    "height_cm": pi["height_cm"],
-                    "weight_kg": pi["weight_kg"],
-                    "bmi": bmi_value,
-                    "bmi_category": bmi_category,
-                    "smoker": pi["smoker"],
-                    "family_history_diabetes": pi["family_history_diabetes"],
-                    "family_history_heart_disease": pi["family_history_heart_disease"],
-                    "symptoms": pi["symptoms"],
-                    "consent": pi["consent"],
-                }
+    st.markdown("---")
+    st.markdown("### ⚙️ App Settings")
+    poppler_path = st.text_input(
+        "Poppler path (Windows only, optional)",
+        value="",
+        help="If pdf2image fails on Windows, install Poppler and paste its /bin path here.",
+    ).strip() or None
 
-                rec.setdefault("processed_indicators", {})
-                rec["processed_indicators"]["disease_indicators"] = indicators
-                rec["risk_result"] = risk
-                rec["model_used"] = {
-                    "diabetes": "rf_reduced_4_tuned.pkl",
-                    "heart": "rule_based_engine",
-                }
-                rec["status"] = "Scored"
+    show_raw_text = st.checkbox("Show raw extracted text", value=False)
+    raw_preview_chars = st.slider("Raw text preview length", 500, 12000, 4000, step=500)
 
-                st.session_state.record = rec
-                st.session_state.indicators = indicators
-                st.session_state.risk = risk
+    st.markdown("---")
+    with st.expander("Disclaimer", expanded=False):
+        st.warning(
+            "This prototype provides informational and non-diagnostic outputs only. "
+            "It should not be used as medical advice or as a replacement for professional evaluation."
+        )
 
-                st.success("Done! Go to the Results tab to view structured indicators and risk summary.")
+    with st.expander("Developer Tools", expanded=False):
+        render_sidebar_export()
+
+
+# ---------------------------------------------------
+# NAVIGATION
+# ---------------------------------------------------
+home_tab, upload_tab, results_tab = st.tabs(
+    ["Home Dashboard", "Upload & Analyze", "Detailed Results"]
+)
+
+
+# ---------------------------------------------------
+# HOME DASHBOARD
+# ---------------------------------------------------
+with home_tab:
+    st.markdown("## 🏥 Health Dashboard")
+
+    rec = st.session_state.record
+    indicators = st.session_state.indicators
+    risk = st.session_state.risk
+    history = st.session_state["history"]
+
+    if rec is None or risk is None:
+        st.info("No analysis yet. Go to Upload & Analyze to process a patient report.")
+
+        c1, c2, c3 = st.columns(3)
+        with c1:
+            metric_card("Overall Status", "No Analysis Yet", "Upload a report", "#64748b", "📄")
+        with c2:
+            metric_card("Patient View", "Friendly", "Clear and simple", "#0ea5e9", "✨")
+        with c3:
+            metric_card("AI Help", "Ready", "Ask after analysis", "#8b5cf6", "🤖")
+    else:
+        overall_label, overall_note = overall_health_summary(risk)
+        overall_color = get_status_color(overall_label)
+
+        st.markdown(
+            f"""
+            <div style="
+                background: linear-gradient(135deg, {overall_color}14, #ffffff);
+                border: 1px solid {overall_color}26;
+                border-radius: 22px;
+                padding: 22px;
+                box-shadow: 0 8px 22px rgba(15, 23, 42, 0.06);
+                margin-bottom: 16px;
+            ">
+                <div style="font-size: 0.92rem; color: #64748b; margin-bottom: 6px;">🩺 Overall Health Snapshot</div>
+                <div style="font-size: 2.2rem; font-weight: 800; color: #0f172a; margin-bottom: 6px;">{overall_label}</div>
+                <div style="font-size: 0.98rem; color: #334155; margin-bottom: 10px;">{overall_note}</div>
+                <div style="font-size: 0.88rem; color: #64748b;">Last analysis status: {rec.get('status', 'Unknown')}</div>
+            </div>
+            """,
+            unsafe_allow_html=True,
+        )
+
+        compact_pills([
+            f"Diabetes: {risk.get('diabetes', {}).get('risk_level', '—')}",
+            f"Heart: {risk.get('heart', {}).get('risk_level', '—')}",
+            f"BMI: {rec.get('patient_inputs', {}).get('bmi', '—')}",
+            f"Symptoms: {len(rec.get('patient_inputs', {}).get('symptoms', []))}",
+        ])
+
+        c1, c2, c3, c4 = st.columns(4)
+        with c1:
+            metric_card(
+                "Diabetes Risk",
+                str(risk.get("diabetes", {}).get("risk_level", "—")),
+                "ML-based",
+                get_status_color(str(risk.get("diabetes", {}).get("risk_level", ""))),
+                "🩸",
+            )
+        with c2:
+            metric_card(
+                "Heart Risk",
+                str(risk.get("heart", {}).get("risk_level", "—")),
+                "Rule-based",
+                get_status_color(str(risk.get("heart", {}).get("risk_level", ""))),
+                "❤️",
+            )
+        with c3:
+            metric_card(
+                "BMI",
+                str(rec.get("patient_inputs", {}).get("bmi", "—")),
+                str(rec.get("patient_inputs", {}).get("bmi_category", "")),
+                "#14b8a6",
+                "⚖️",
+            )
+        with c4:
+            metric_card(
+                "Symptoms",
+                str(len(rec.get("patient_inputs", {}).get("symptoms", []))),
+                "Reported",
+                "#8b5cf6",
+                "📝",
+            )
+
+        st.markdown("### ✨ Summary")
+        info_card("At a glance", patient_friendly_explanation(risk), "#2563eb", "📘")
+
+        priorities = generate_priorities(risk, indicators)
+        questions = generate_doctor_questions(risk, indicators)
+
+        pcol1, pcol2 = st.columns(2)
+        with pcol1:
+            info_card(
+                "Top Priorities",
+                "<br>".join([f"• {p}" for p in priorities]),
+                "#f59e0b",
+                "🎯",
+            )
+        with pcol2:
+            info_card(
+                "Doctor Questions",
+                "<br>".join([f"• {q}" for q in questions]),
+                "#8b5cf6",
+                "👨‍⚕️",
+            )
+
+        st.markdown("### 🧪 Key Health Indicators")
+        extract_key_indicator_cards(indicators)
+
+        st.markdown("### 🌿 Lifestyle Suggestions")
+        recs = generate_lifestyle_recommendations(risk, rec.get("patient_inputs", {}), indicators)
+        rc1, rc2 = st.columns(2)
+        with rc1:
+            info_card("Food", "<br>".join([f"• {x}" for x in recs["Food"]]), "#f59e0b", "🥗")
+            info_card("Activity", "<br>".join([f"• {x}" for x in recs["Activity"]]), "#10b981", "🚶")
+        with rc2:
+            info_card("Daily Habits", "<br>".join([f"• {x}" for x in recs["Daily Habits"]]), "#0ea5e9", "🛌")
+            info_card("Follow-Up", "<br>".join([f"• {x}" for x in recs["Follow-Up"]]), "#ef4444", "📅")
+
+        st.markdown("### 📈 Comparison With Past Report")
+        comparison = compare_with_previous(history)
+        comp1, comp2, comp3 = st.columns(3)
+        with comp1:
+            comparison_card("Glucose", comparison.get("glucose_delta"), better_when_lower=True)
+        with comp2:
+            comparison_card("Systolic BP", comparison.get("systolic_bp_delta"), better_when_lower=True)
+        with comp3:
+            comparison_card("BMI", comparison.get("bmi_delta"), better_when_lower=True)
+
+        st.markdown("### 📊 Trends Over Time")
+        t1, t2, t3 = st.columns(3)
+        with t1:
+            st.markdown("**Glucose**")
+            render_trend_chart(history, "glucose", "Glucose")
+        with t2:
+            st.markdown("**Systolic BP**")
+            render_trend_chart(history, "systolic_bp", "Systolic BP")
+        with t3:
+            st.markdown("**BMI**")
+            render_trend_chart(history, "bmi", "BMI")
+
+        st.markdown("### 🤖 Ask AI About This Report")
+        if not st.session_state["chat_history"]:
+            st.caption("Ask something simple, like: What does my glucose mean?")
+
+        for msg in st.session_state["chat_history"]:
+            with st.chat_message(msg["role"]):
+                st.write(msg["content"])
+
+        chat_col1, chat_col2 = st.columns([5, 1])
+        with chat_col1:
+            question = st.text_input(
+                "Ask a question about the report",
+                placeholder="Example: What does my glucose mean?",
+                key="ai_question",
+            )
+        with chat_col2:
+            send_clicked = st.button("Send", key="send_ai_question", use_container_width=True)
+
+        if send_clicked and question.strip():
+            st.session_state["chat_history"].append({"role": "user", "content": question})
+            answer = ask_llm_about_report(question, rec, indicators, risk)
+            st.session_state["chat_history"].append({"role": "assistant", "content": answer})
+            st.rerun()
+
+        st.caption("This assistant explains results in simple language and does not provide diagnosis.")
+
 
 # -------------------------
 # TAB 2: Results
@@ -883,25 +994,98 @@ with tab_results:
             raw = rec.get("raw_text", "")
             st.text_area("Raw text", raw[:raw_preview_chars], height=260)
 
-# -------------------------
-# TAB 3: Export
-# -------------------------
-with tab_export:
-    st.subheader("Export JSON")
+# ---------------------------------------------------
+# DETAILED RESULTS
+# ---------------------------------------------------
+with results_tab:
+    st.markdown("## 🧾 Detailed Results")
 
     rec = st.session_state.record
+    indicators = st.session_state.indicators
+    risk = st.session_state.risk
+
     if rec is None:
-        st.info("Nothing to export yet. Run the pipeline first.")
+        st.info("No run yet. Go to Upload & Analyze first.")
     else:
-        st.caption("This JSON is useful evidence for your progress report.")
-        json_bytes = json.dumps(rec, indent=2).encode("utf-8")
+        c1, c2, c3 = st.columns(3)
+        with c1:
+            st.metric("Status", rec.get("status", ""))
+        with c2:
+            st.metric("Patient ID", rec.get("patient_id", ""))
+        with c3:
+            st.metric("Extracted Characters", str(len(rec.get("raw_text", ""))))
 
-        st.download_button(
-            "Download structured JSON",
-            data=json_bytes,
-            file_name=f"{rec.get('patient_id', 'record')}_record.json",
-            mime="application/json",
-        )
+        st.markdown("### Patient Inputs")
+        pi = rec.get("patient_inputs", {})
+        p1, p2, p3, p4 = st.columns(4)
+        with p1:
+            st.metric("Age", str(pi.get("age", "")))
+        with p2:
+            st.metric("BMI", "—" if pi.get("bmi") is None else str(pi.get("bmi")))
+        with p3:
+            st.metric("BMI Category", str(pi.get("bmi_category", "")))
+        with p4:
+            st.metric("Smoker", str(pi.get("smoker", "")))
 
-        st.markdown("### JSON Preview")
-        st.code(json.dumps(rec, indent=2), language="json")
+        st.markdown("### Extracted Diabetes / Heart Indicators")
+        if not indicators:
+            st.warning("No diabetes or heart-related indicators detected.")
+        else:
+            rows = []
+            for name, v in indicators.items():
+                rows.append(
+                    {
+                        "Indicator": name,
+                        "Value": v.get("value"),
+                        "Unit": v.get("unit", ""),
+                        "Reference": v.get("ref_raw", ""),
+                        "Flag": v.get("flag", ""),
+                    }
+                )
+            st.dataframe(pd.DataFrame(rows), use_container_width=True)
+
+        st.markdown("### Risk Summary")
+        if not risk:
+            st.info("Risk result not available yet.")
+        else:
+            st.markdown("#### Diabetes Risk")
+            d1, d2, d3 = st.columns(3)
+            d1.metric("Risk Level", risk.get("diabetes", {}).get("risk_level", ""))
+            d2.metric("Confidence Score", str(risk.get("diabetes", {}).get("confidence_score", "")))
+            d3.metric("Risk Score", str(risk.get("diabetes", {}).get("risk_score", "")))
+
+            st.markdown("**Contributing Indicators — Diabetes**")
+            reasons_d = risk.get("diabetes", {}).get("reasons", [])
+            if reasons_d:
+                for item in reasons_d:
+                    st.write(f"• {item}")
+            else:
+                st.write("• No reasons available")
+
+            st.markdown("#### Heart Disease Risk")
+            h1, h2, h3 = st.columns(3)
+            h1.metric("Risk Level", risk.get("heart", {}).get("risk_level", ""))
+            h2.metric("Confidence Score", str(risk.get("heart", {}).get("confidence_score", "")))
+            h3.metric("Risk Score", str(risk.get("heart", {}).get("risk_score", "")))
+
+            st.markdown("**Contributing Indicators — Heart Disease**")
+            reasons_h = risk.get("heart", {}).get("reasons", [])
+            if reasons_h:
+                for item in reasons_h:
+                    st.write(f"• {item}")
+            else:
+                st.write("• No reasons available")
+
+            with st.expander("Recommendations / Notes", expanded=False):
+                for tip in risk.get("general_notes", []):
+                    st.write(f"• {tip}")
+
+            st.warning(
+                "These outputs are informational and non-diagnostic. "
+                "They are intended to support understanding of possible risk indicators and should not replace professional medical evaluation."
+            )
+
+        if show_raw_text:
+            st.markdown("### Raw Extracted Text (Preview)")
+            raw = rec.get("raw_text", "")
+            st.text_area("Raw text", raw[:raw_preview_chars], height=260)
