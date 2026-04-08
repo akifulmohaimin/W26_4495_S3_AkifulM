@@ -15,7 +15,7 @@
 
 ## Project Overview
 
-This project implements a patient-centered Clinical Decision Support System (CDSS) designed to help non-clinical users understand potential disease risk indicators from medical reports.
+The Clinical Decision Support System (CDSS) is a medical intelligence prototype that bridges the gap between raw laboratory data and patient understanding. The system provides a secure, end-to-end pipeline that ingests medical reports (PDF/JPG/PNG), extracts critical health indicators using Optical Character Recognition (OCR), and applies a rule-based risk engine to generate preliminary health insights.
 
 The system:
 - Accepts PDF lab reports (text-based and scanned)
