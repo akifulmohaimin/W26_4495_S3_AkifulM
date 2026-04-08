@@ -17,24 +17,17 @@
 
 The Clinical Decision Support System (CDSS) is a medical intelligence prototype that bridges the gap between raw laboratory data and patient understanding. The system provides a secure, end-to-end pipeline that ingests medical reports (PDF/JPG/PNG), extracts critical health indicators using Optical Character Recognition (OCR), and applies a rule-based risk engine to generate preliminary health insights.
 
-Core Modules:
+### Core Modules:
 - Secure Authentication: A robust login and registration gateway designed to protect sensitive patient profiles.
-
 - Interactive Patient Dashboard: A user-centric interface for tracking demographics, physical metrics (Height/Weight), and current symptoms.
-
 - Intelligent Extraction Pipeline: A hybrid processing engine that utilizes fast-path text extraction for digital files and an OCR fallback for scanned documents.
-
 - Advanced Risk Engine: A rule-based logic system that evaluates extracted biomarkers to compute risk scores for conditions such as Diabetes and Heart Disease.
 
-Key Features
+### Key Features:
 - Automated Health Metrics: Real-time calculation of BMI and health categorization based on user profile inputs.
-
 - Indicator Parsing & Flagging: Automatically identifies indicators (e.g., Glucose, HbA1c, Cholesterol) and flags them as Low, Normal, or High against standard reference ranges.
-
 - Detailed Risk Summaries: Provides quantified Risk Levels and Confidence Scores, accompanied by specific clinical explanations for the findings.
-
 - Secure Data Handling: Implements file extension validation and structured upload handling to ensure data integrity.
-
 - Professional Export: Capability to generate and download a full clinical record in structured JSON format for healthcare interoperability.
 
 In short, this system:
