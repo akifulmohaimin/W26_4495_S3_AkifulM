@@ -96,7 +96,7 @@ You should now see `(venv)` in the terminal.
 ## Step 3 – Install Python Dependencies
 
 ```
-pip install streamlit pytesseract pdf2image pillow pypdf pandas numpy scikit-learn
+pip install pip install streamlit pytesseract pdf2image pillow pypdf pandas numpy scikit-learn
 ```
 
 ---
