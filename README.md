@@ -109,56 +109,13 @@ You should now see `(venv)` in the terminal.
 ## Step 3 – Install Python Dependencies
 
 ```
-pip install pip install streamlit pytesseract pdf2image pillow pypdf pandas numpy scikit-learn
+pip install -r requirements.txt
 ```
 
----
-
-## Step 4 – Install External Dependencies
-
-### Install Tesseract OCR
-
-Windows:  
-Download from:  
-https://github.com/tesseract-ocr/tesseract  
-
-Add installation path to system PATH.
-
-Mac:
 ```
-brew install tesseract
-```
-
-Linux:
-```
-sudo apt install tesseract-ocr
-```
-
----
-
-### Install Poppler
-
-Mac:
-```
-brew install poppler
-```
-
-Linux:
-```
-sudo apt install poppler-utils
-```
-
-Windows:  
-Download Poppler binaries and add to PATH.
-
----
-
 # Running the Application (VS Code)
 
 In VS Code terminal:
-
-```bash
-cd Implementation
 streamlit run sampleapp.py
 ```
 
