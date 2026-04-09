@@ -1,7 +1,3 @@
-# Stage 3: Simple rule-based risk scoring + explanations (non-diagnostic)
-# Diabetes + Heart Disease version
-# Plug this into the pipeline after Stage 2 indicator extraction.
-
 from __future__ import annotations
 
 import joblib
@@ -26,8 +22,7 @@ diabetes_threshold = joblib.load(threshold_path) if threshold_path.exists() else
 # -----------------------------
 # LOAD HEART MODEL
 # -----------------------------
-
-heart_model = joblib.load("heart_project/best_heart_rf_model.pkl")
+heart_model = joblib.load(MODEL_DIR / "best_heart_model_pipeline.pkl")
 
 
 # -----------------------------
@@ -132,59 +127,38 @@ def predict_heart_risk(
     st_slope: Optional[str],
 ) -> Dict[str, Any]:
 
-    def encode_sex(value):
-        return {"M": 1, "Male": 1, "F": 0, "Female": 0}.get(str(value).strip(), None)
-
-    def encode_cp(value):
-        return {"ATA": 0, "NAP": 1, "ASY": 2, "TA": 3}.get(str(value).strip(), None)
-
-    def encode_ecg(value):
-        return {"Normal": 0, "ST": 1, "LVH": 2}.get(str(value).strip(), None)
-
-    def encode_angina(value):
-        return {"N": 0, "No": 0, "Y": 1, "Yes": 1}.get(str(value).strip(), None)
-
-    def encode_slope(value):
-        return {"Up": 0, "Flat": 1, "Down": 2}.get(str(value).strip(), None)
-
-    sex_encoded = encode_sex(sex)
-    cp_encoded = encode_cp(chest_pain_type)
-    ecg_encoded = encode_ecg(resting_ecg)
-    angina_encoded = encode_angina(exercise_angina)
-    slope_encoded = encode_slope(st_slope)
-
     required_fields = {
         "Age": age,
-        "Sex": sex_encoded,
-        "ChestPainType": cp_encoded,
+        "Sex": sex,
+        "ChestPainType": chest_pain_type,
         "RestingBP": resting_bp,
         "Cholesterol": cholesterol,
         "FastingBS": fasting_bs,
-        "RestingECG": ecg_encoded,
+        "RestingECG": resting_ecg,
         "MaxHR": max_hr,
-        "ExerciseAngina": angina_encoded,
+        "ExerciseAngina": exercise_angina,
         "Oldpeak": oldpeak,
-        "ST_Slope": slope_encoded,
+        "ST_Slope": st_slope,
     }
 
     missing = [k for k, v in required_fields.items() if v is None]
     if missing:
         return _insufficient_result(
-            f"Missing or unrecognized heart-risk inputs: {', '.join(missing)}."
+            f"Missing heart-risk inputs: {', '.join(missing)}."
         )
 
     row = pd.DataFrame([{
         "Age": int(age),
-        "Sex": int(sex_encoded),
-        "ChestPainType": int(cp_encoded),
+        "Sex": str(sex),
+        "ChestPainType": str(chest_pain_type),
         "RestingBP": float(resting_bp),
         "Cholesterol": float(cholesterol),
         "FastingBS": int(fasting_bs),
-        "RestingECG": int(ecg_encoded),
+        "RestingECG": str(resting_ecg),
         "MaxHR": float(max_hr),
-        "ExerciseAngina": int(angina_encoded),
+        "ExerciseAngina": str(exercise_angina),
         "Oldpeak": float(oldpeak),
-        "ST_Slope": int(slope_encoded),
+        "ST_Slope": str(st_slope),
     }])
 
     proba = float(heart_model.predict_proba(row)[0][1])
@@ -197,7 +171,7 @@ def predict_heart_risk(
         reasons.append("Asymptomatic chest pain pattern is associated with higher heart risk")
     if fasting_bs == 1:
         reasons.append("Fasting blood sugar is elevated")
-    if exercise_angina in {"Y", "Yes"}:
+    if exercise_angina == "Y":
         reasons.append("Exercise-induced angina increases cardiovascular concern")
     if oldpeak is not None and float(oldpeak) >= 1.0:
         reasons.append(f"Oldpeak is elevated ({oldpeak})")
@@ -217,6 +191,7 @@ def predict_heart_risk(
         "risk_level": level,
         "reasons": reasons if reasons else ["No strong contributing indicators detected."],
     }
+
 
 # -----------------------------
 # CO-OCCURRENCE FUSION
