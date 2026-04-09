@@ -10,7 +10,7 @@
    <br> <br> <br>
 
 
-# Clinical Decision Support System (CDSS)  
+# HealthLens: Clinical Decision Support System (CDSS)  
 **CSIS 4495 – Applied Research Project (Winter 2026)**  
 
 ## Project Overview
