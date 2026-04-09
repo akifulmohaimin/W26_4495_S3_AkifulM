@@ -16,7 +16,7 @@ pip install pytesseract pdf2image pillow pypdf
 
 import json
 import re
-import uuid
+import uuid 
 from pathlib import Path
 from typing import Optional, Tuple, Dict, Any
 
