@@ -3,303 +3,311 @@
 # Plug this into the pipeline after Stage 2 indicator extraction.
 
 from __future__ import annotations
+
+import joblib
+import pandas as pd
+from pathlib import Path
 from typing import Dict, Any, List, Optional
 
 
-def _safe_flag(indicators: Dict[str, Dict[str, Any]], key: str) -> str:
-    return str(indicators.get(key, {}).get("flag", "")).strip()
+MODEL_DIR = Path("outputs/models")
 
 
-def _safe_value(indicators: Dict[str, Dict[str, Any]], key: str) -> Optional[float]:
-    value = indicators.get(key, {}).get("value")
-    try:
-        return float(value) if value is not None else None
-    except Exception:
-        return None
+# -----------------------------
+# LOAD DIABETES MODEL
+# -----------------------------
+diabetes_model = joblib.load(MODEL_DIR / "rf_reduced_4_tuned.pkl")
+diabetes_features = joblib.load(MODEL_DIR / "diabetes_feature_columns.pkl")
+
+threshold_path = MODEL_DIR / "diabetes_threshold.pkl"
+diabetes_threshold = joblib.load(threshold_path) if threshold_path.exists() else 0.50
 
 
-def _is_high(indicators: Dict[str, Dict[str, Any]], key: str) -> bool:
-    return _safe_flag(indicators, key).lower() == "high"
+# -----------------------------
+# LOAD HEART MODEL
+# -----------------------------
+
+heart_model = joblib.load("heart_project/best_heart_rf_model.pkl")
 
 
-def _is_low(indicators: Dict[str, Dict[str, Any]], key: str) -> bool:
-    return _safe_flag(indicators, key).lower() == "low"
-
-
-def _yes(value: Any) -> bool:
-    return str(value).strip().lower() == "yes"
-
-
-def _risk_level_from_score(score: float) -> str:
-    if score < 0.25:
-        return "Low"
-    elif score < 0.55:
-        return "Moderate"
-    return "High"
-
-
-def _build_insufficient_result(message: str) -> Dict[str, Any]:
+# -----------------------------
+# HELPERS
+# -----------------------------
+def _insufficient_result(message: str) -> Dict[str, Any]:
     return {
-        "risk_level": "Insufficient Data",
-        "confidence_score": None,
+        "prediction": None,
         "risk_score": None,
-        "abnormal_count": 0,
+        "confidence_score": None,
+        "risk_level": "Insufficient Data",
         "reasons": [message],
     }
 
 
-def _compute_diabetes_risk(
-    indicators: Dict[str, Dict[str, Any]],
-    patient_inputs: Dict[str, Any]
+def _risk_level_from_probability(prob: float) -> str:
+    if prob < 0.30:
+        return "Low"
+    elif prob < 0.60:
+        return "Moderate"
+    return "High"
+
+
+# -----------------------------
+# DIABETES ML PREDICTION
+# -----------------------------
+def predict_diabetes_risk(
+    glucose: Optional[float],
+    bmi: Optional[float],
+    blood_pressure: Optional[float],
+    age: Optional[int],
 ) -> Dict[str, Any]:
+
+    if glucose is None:
+        return _insufficient_result("Glucose value could not be extracted from the report.")
+
+    row = pd.DataFrame([{
+        "Glucose": float(glucose),
+        "BMI": float(bmi) if bmi is not None else 0.0,
+        "BloodPressure": float(blood_pressure) if blood_pressure is not None else 0.0,
+        "Age": int(age) if age is not None else 0,
+    }])
+
+    row = row[diabetes_features]
+
+    proba = float(diabetes_model.predict_proba(row)[0][1])
+    pred = 1 if proba >= diabetes_threshold else 0
+    level = _risk_level_from_probability(proba)
+
     reasons: List[str] = []
-    score = 0.0
-    abnormal_count = 0
 
-    found_diabetes_data = False
-
-    glucose = _safe_value(indicators, "glucose")
-    hba1c = _safe_value(indicators, "hba1c")
-    bmi = patient_inputs.get("bmi")
-    age = patient_inputs.get("age")
-
-    if glucose is not None:
-        found_diabetes_data = True
-        if glucose >= 126:
-            score += 0.35
-            abnormal_count += 1
-            reasons.append(f"Glucose is elevated ({glucose})")
-        elif glucose >= 100:
-            score += 0.20
-            abnormal_count += 1
-            reasons.append(f"Glucose is above ideal range ({glucose})")
-
-    if hba1c is not None:
-        found_diabetes_data = True
-        if hba1c >= 6.5:
-            score += 0.35
-            abnormal_count += 1
-            reasons.append(f"HbA1c is elevated ({hba1c}%)")
-        elif hba1c >= 5.7:
-            score += 0.20
-            abnormal_count += 1
-            reasons.append(f"HbA1c is above ideal range ({hba1c}%)")
+    if glucose >= 126:
+        reasons.append(f"Glucose is elevated ({glucose})")
+    elif glucose >= 100:
+        reasons.append(f"Glucose is above ideal range ({glucose})")
 
     if bmi is not None:
-        try:
-            bmi = float(bmi)
-            if bmi >= 30:
-                score += 0.15
-                reasons.append(f"BMI is in the obese range ({bmi})")
-            elif bmi >= 25:
-                score += 0.08
-                reasons.append(f"BMI is in the overweight range ({bmi})")
-        except Exception:
-            pass
+        if bmi >= 30:
+            reasons.append(f"BMI is in the obese range ({bmi})")
+        elif bmi >= 25:
+            reasons.append(f"BMI is in the overweight range ({bmi})")
 
-    if age is not None:
-        try:
-            age = int(age)
-            if age >= 45:
-                score += 0.08
-                reasons.append(f"Age is a contributing diabetes risk factor ({age})")
-        except Exception:
-            pass
+    if blood_pressure is not None:
+        if blood_pressure >= 90:
+            reasons.append(f"Blood pressure is elevated ({blood_pressure})")
+        elif blood_pressure >= 80:
+            reasons.append(f"Blood pressure is above ideal range ({blood_pressure})")
 
-    if _yes(patient_inputs.get("family_history_diabetes")):
-        score += 0.12
-        reasons.append("Family history of diabetes reported")
+    if age is not None and age >= 45:
+        reasons.append(f"Age is a contributing factor ({age})")
 
-    symptoms = [str(s).strip().lower() for s in patient_inputs.get("symptoms", [])]
-    diabetes_symptom_hits = {
-        "frequent urination",
-        "increased thirst",
-        "blurred vision",
-        "fatigue",
-    }
-    matched_symptoms = [s for s in symptoms if s in diabetes_symptom_hits]
-    if matched_symptoms:
-        score += min(0.12, 0.04 * len(matched_symptoms))
-        reasons.append("Reported symptoms may align with diabetes-related concerns")
-
-    # If neither glucose nor hba1c exists, treat as insufficient disease-specific data
-    if not found_diabetes_data:
-        return _build_insufficient_result("No diabetes-related indicators detected in the uploaded report.")
-
-    score = min(1.0, score)
-    level = _risk_level_from_score(score)
-    confidence = min(0.95, 0.55 + score * 0.4)
+    if glucose >= 126:
+        level = "High"
+        proba = max(proba, 0.70)
+    elif glucose >= 100:
+        level = "Moderate"
+        proba = max(proba, 0.40)
 
     return {
+        "prediction": int(pred),
+        "risk_score": round(proba, 2),
+        "confidence_score": round(max(proba, 1 - proba), 2),
         "risk_level": level,
-        "confidence_score": round(confidence, 2),
-        "risk_score": round(score, 2),
-        "abnormal_count": abnormal_count,
-        "reasons": reasons if reasons else ["No strong diabetes-related abnormalities detected."],
+        "reasons": reasons if reasons else ["No strong contributing indicators detected."],
     }
 
 
-def _compute_heart_risk(
-    indicators: Dict[str, Dict[str, Any]],
-    patient_inputs: Dict[str, Any]
+# -----------------------------
+# HEART ML PREDICTION
+# -----------------------------
+def predict_heart_risk(
+    age: Optional[int],
+    sex: Optional[str],
+    chest_pain_type: Optional[str],
+    resting_bp: Optional[float],
+    cholesterol: Optional[float],
+    fasting_bs: Optional[int],
+    resting_ecg: Optional[str],
+    max_hr: Optional[float],
+    exercise_angina: Optional[str],
+    oldpeak: Optional[float],
+    st_slope: Optional[str],
 ) -> Dict[str, Any]:
+
+    def encode_sex(value):
+        return {"M": 1, "Male": 1, "F": 0, "Female": 0}.get(str(value).strip(), None)
+
+    def encode_cp(value):
+        return {"ATA": 0, "NAP": 1, "ASY": 2, "TA": 3}.get(str(value).strip(), None)
+
+    def encode_ecg(value):
+        return {"Normal": 0, "ST": 1, "LVH": 2}.get(str(value).strip(), None)
+
+    def encode_angina(value):
+        return {"N": 0, "No": 0, "Y": 1, "Yes": 1}.get(str(value).strip(), None)
+
+    def encode_slope(value):
+        return {"Up": 0, "Flat": 1, "Down": 2}.get(str(value).strip(), None)
+
+    sex_encoded = encode_sex(sex)
+    cp_encoded = encode_cp(chest_pain_type)
+    ecg_encoded = encode_ecg(resting_ecg)
+    angina_encoded = encode_angina(exercise_angina)
+    slope_encoded = encode_slope(st_slope)
+
+    required_fields = {
+        "Age": age,
+        "Sex": sex_encoded,
+        "ChestPainType": cp_encoded,
+        "RestingBP": resting_bp,
+        "Cholesterol": cholesterol,
+        "FastingBS": fasting_bs,
+        "RestingECG": ecg_encoded,
+        "MaxHR": max_hr,
+        "ExerciseAngina": angina_encoded,
+        "Oldpeak": oldpeak,
+        "ST_Slope": slope_encoded,
+    }
+
+    missing = [k for k, v in required_fields.items() if v is None]
+    if missing:
+        return _insufficient_result(
+            f"Missing or unrecognized heart-risk inputs: {', '.join(missing)}."
+        )
+
+    row = pd.DataFrame([{
+        "Age": int(age),
+        "Sex": int(sex_encoded),
+        "ChestPainType": int(cp_encoded),
+        "RestingBP": float(resting_bp),
+        "Cholesterol": float(cholesterol),
+        "FastingBS": int(fasting_bs),
+        "RestingECG": int(ecg_encoded),
+        "MaxHR": float(max_hr),
+        "ExerciseAngina": int(angina_encoded),
+        "Oldpeak": float(oldpeak),
+        "ST_Slope": int(slope_encoded),
+    }])
+
+    proba = float(heart_model.predict_proba(row)[0][1])
+    pred = 1 if proba >= 0.50 else 0
+    level = _risk_level_from_probability(proba)
+
     reasons: List[str] = []
-    score = 0.0
-    abnormal_count = 0
 
-    found_heart_data = False
-
-    total_chol = _safe_value(indicators, "cholesterol_total")
-    ldl = _safe_value(indicators, "ldl")
-    hdl = _safe_value(indicators, "hdl")
-    triglycerides = _safe_value(indicators, "triglycerides")
-    systolic_bp = _safe_value(indicators, "systolic_bp")
-    diastolic_bp = _safe_value(indicators, "diastolic_bp")
-    bmi = patient_inputs.get("bmi")
-    age = patient_inputs.get("age")
-
-    if total_chol is not None:
-        found_heart_data = True
-        if total_chol >= 240:
-            score += 0.18
-            abnormal_count += 1
-            reasons.append(f"Total cholesterol is high ({total_chol})")
-        elif total_chol >= 200:
-            score += 0.10
-            abnormal_count += 1
-            reasons.append(f"Total cholesterol is above ideal range ({total_chol})")
-
-    if ldl is not None:
-        found_heart_data = True
-        if ldl >= 160:
-            score += 0.22
-            abnormal_count += 1
-            reasons.append(f"LDL is high ({ldl})")
-        elif ldl >= 100:
-            score += 0.12
-            abnormal_count += 1
-            reasons.append(f"LDL is above ideal range ({ldl})")
-
-    if hdl is not None:
-        found_heart_data = True
-        if hdl < 40:
-            score += 0.18
-            abnormal_count += 1
-            reasons.append(f"HDL is low ({hdl})")
-
-    if triglycerides is not None:
-        found_heart_data = True
-        if triglycerides >= 200:
-            score += 0.18
-            abnormal_count += 1
-            reasons.append(f"Triglycerides are high ({triglycerides})")
-        elif triglycerides >= 150:
-            score += 0.10
-            abnormal_count += 1
-            reasons.append(f"Triglycerides are above ideal range ({triglycerides})")
-
-    if systolic_bp is not None:
-        found_heart_data = True
-        if systolic_bp >= 140:
-            score += 0.18
-            abnormal_count += 1
-            reasons.append(f"Systolic blood pressure is high ({systolic_bp})")
-        elif systolic_bp >= 120:
-            score += 0.10
-            abnormal_count += 1
-            reasons.append(f"Systolic blood pressure is above ideal range ({systolic_bp})")
-
-    if diastolic_bp is not None:
-        found_heart_data = True
-        if diastolic_bp >= 90:
-            score += 0.18
-            abnormal_count += 1
-            reasons.append(f"Diastolic blood pressure is high ({diastolic_bp})")
-        elif diastolic_bp >= 80:
-            score += 0.10
-            abnormal_count += 1
-            reasons.append(f"Diastolic blood pressure is above ideal range ({diastolic_bp})")
-
-    if bmi is not None:
-        try:
-            bmi = float(bmi)
-            if bmi >= 30:
-                score += 0.12
-                reasons.append(f"BMI is in the obese range ({bmi})")
-            elif bmi >= 25:
-                score += 0.06
-                reasons.append(f"BMI is in the overweight range ({bmi})")
-        except Exception:
-            pass
-
-    if age is not None:
-        try:
-            age = int(age)
-            if age >= 45:
-                score += 0.08
-                reasons.append(f"Age is a contributing cardiovascular risk factor ({age})")
-        except Exception:
-            pass
-
-    if _yes(patient_inputs.get("smoker")):
-        score += 0.14
-        reasons.append("Smoking status increases heart disease risk")
-
-    if _yes(patient_inputs.get("family_history_heart_disease")):
-        score += 0.12
-        reasons.append("Family history of heart disease reported")
-
-    symptoms = [str(s).strip().lower() for s in patient_inputs.get("symptoms", [])]
-    heart_symptom_hits = {
-        "chest pain",
-        "shortness of breath",
-        "dizziness",
-        "palpitations",
-    }
-    matched_symptoms = [s for s in symptoms if s in heart_symptom_hits]
-    if matched_symptoms:
-        score += min(0.12, 0.04 * len(matched_symptoms))
-        reasons.append("Reported symptoms may align with cardiovascular-related concerns")
-
-    if not found_heart_data:
-        return _build_insufficient_result("No heart-related indicators detected in the uploaded report.")
-
-    score = min(1.0, score)
-    level = _risk_level_from_score(score)
-    confidence = min(0.95, 0.55 + score * 0.4)
+    if chest_pain_type == "ASY":
+        reasons.append("Asymptomatic chest pain pattern is associated with higher heart risk")
+    if fasting_bs == 1:
+        reasons.append("Fasting blood sugar is elevated")
+    if exercise_angina in {"Y", "Yes"}:
+        reasons.append("Exercise-induced angina increases cardiovascular concern")
+    if oldpeak is not None and float(oldpeak) >= 1.0:
+        reasons.append(f"Oldpeak is elevated ({oldpeak})")
+    if st_slope in {"Flat", "Down"}:
+        reasons.append(f"ST slope pattern ({st_slope}) may indicate elevated cardiovascular risk")
+    if cholesterol is not None and float(cholesterol) >= 200:
+        reasons.append(f"Cholesterol is above ideal range ({cholesterol})")
+    if resting_bp is not None and float(resting_bp) >= 140:
+        reasons.append(f"Resting blood pressure is elevated ({resting_bp})")
+    if age is not None and int(age) >= 45:
+        reasons.append(f"Age is a contributing cardiovascular factor ({age})")
 
     return {
+        "prediction": int(pred),
+        "risk_score": round(proba, 2),
+        "confidence_score": round(max(proba, 1 - proba), 2),
         "risk_level": level,
+        "reasons": reasons if reasons else ["No strong contributing indicators detected."],
+    }
+
+# -----------------------------
+# CO-OCCURRENCE FUSION
+# -----------------------------
+def compute_cooccurrence_risk(
+    diabetes_result: Dict[str, Any],
+    heart_result: Dict[str, Any],
+) -> Dict[str, Any]:
+
+    diabetes_score = diabetes_result.get("risk_score")
+    heart_score = heart_result.get("risk_score")
+
+    if diabetes_score is None and heart_score is None:
+        return _insufficient_result("Diabetes and heart disease risk scores are unavailable.")
+
+    if diabetes_score is None:
+        final_score = float(heart_score)
+        reasons = ["Only heart disease risk was available, so co-occurrence risk is based on heart risk alone."]
+    elif heart_score is None:
+        final_score = float(diabetes_score)
+        reasons = ["Only diabetes risk was available, so co-occurrence risk is based on diabetes risk alone."]
+    else:
+        combined_average = (float(diabetes_score) + float(heart_score)) / 2.0
+        interaction_effect = float(diabetes_score) * float(heart_score)
+        final_score = (combined_average + interaction_effect) / 2.0
+
+        reasons: List[str] = []
+
+        if diabetes_score >= 0.60:
+            reasons.append("Diabetes risk is elevated.")
+        elif diabetes_score >= 0.30:
+            reasons.append("Diabetes-related indicators are moderately elevated.")
+
+        if heart_score >= 0.60:
+            reasons.append("Heart disease risk is elevated.")
+        elif heart_score >= 0.30:
+            reasons.append("Cardiovascular indicators are moderately elevated.")
+
+        if diabetes_score >= 0.60 and heart_score >= 0.60:
+            reasons.append("Both risks are elevated, increasing possible co-occurrence risk.")
+        elif diabetes_score >= 0.40 and heart_score >= 0.40:
+            reasons.append("Both conditions show overlapping moderate risk patterns.")
+
+    level = _risk_level_from_probability(final_score)
+    prediction = 1 if final_score >= 0.50 else 0
+    confidence = max(final_score, 1 - final_score)
+
+    return {
+        "prediction": int(prediction),
+        "risk_score": round(final_score, 2),
         "confidence_score": round(confidence, 2),
-        "risk_score": round(score, 2),
-        "abnormal_count": abnormal_count,
-        "reasons": reasons if reasons else ["No strong heart-related abnormalities detected."],
+        "risk_level": level,
+        "reasons": reasons if reasons else ["No strong overlapping chronic disease indicators detected."],
     }
 
 
-def compute_diabetes_heart_risk(
-    indicators: Dict[str, Dict[str, Any]],
-    patient_inputs: Dict[str, Any]
-) -> Dict[str, Any]:
-    if not indicators:
-        return {
-            "diabetes": _build_insufficient_result("No structured indicators were extracted."),
-            "heart": _build_insufficient_result("No structured indicators were extracted."),
-            "general_notes": [
-                "Try a clearer report scan or a different report format.",
-                "This tool is for informational support only.",
-            ],
-        }
+# -----------------------------
+# MAIN COMBINED FUNCTION
+# -----------------------------
+def compute_combined_ml_risk(patient_inputs: Dict[str, Any]) -> Dict[str, Any]:
 
-    diabetes_result = _compute_diabetes_risk(indicators, patient_inputs)
-    heart_result = _compute_heart_risk(indicators, patient_inputs)
+    diabetes_result = predict_diabetes_risk(
+        glucose=patient_inputs.get("glucose"),
+        bmi=patient_inputs.get("bmi"),
+        blood_pressure=patient_inputs.get("blood_pressure"),
+        age=patient_inputs.get("age"),
+    )
+
+    heart_result = predict_heart_risk(
+        age=patient_inputs.get("age"),
+        sex=patient_inputs.get("sex"),
+        chest_pain_type=patient_inputs.get("chest_pain_type"),
+        resting_bp=patient_inputs.get("resting_bp"),
+        cholesterol=patient_inputs.get("cholesterol"),
+        fasting_bs=patient_inputs.get("fasting_bs"),
+        resting_ecg=patient_inputs.get("resting_ecg"),
+        max_hr=patient_inputs.get("max_hr"),
+        exercise_angina=patient_inputs.get("exercise_angina"),
+        oldpeak=patient_inputs.get("oldpeak"),
+        st_slope=patient_inputs.get("st_slope"),
+    )
+
+    cooccurrence_result = compute_cooccurrence_risk(diabetes_result, heart_result)
 
     return {
         "diabetes": diabetes_result,
         "heart": heart_result,
+        "cooccurrence": cooccurrence_result,
         "general_notes": [
             "These outputs are informational and non-diagnostic.",
-            "They are based only on the extracted report values and structured patient inputs provided.",
+            "Co-occurrence risk reflects overlapping chronic disease patterns.",
             "Discuss concerning results with a qualified healthcare professional.",
         ],
     }
