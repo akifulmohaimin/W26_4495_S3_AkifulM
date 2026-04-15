@@ -70,7 +70,7 @@ Type:
 Git: Clone
 ```
 
-Paste your repository URL:
+Paste this project repository URL:
 
 ```
 https://github.com/akifulmohaimin/W26_4495_S3_AkifulM
