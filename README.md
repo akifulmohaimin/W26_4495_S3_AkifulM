@@ -73,7 +73,7 @@ Git: Clone
 Paste your repository URL:
 
 ```
-https://github.com/YOUR-USERNAME/W26_4495_S3_AkifulM.git
+https://github.com/akifulmohaimin/W26_4495_S3_AkifulM.git
 ```
 
 Open the cloned folder in VS Code.
