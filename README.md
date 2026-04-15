@@ -73,7 +73,7 @@ Git: Clone
 Paste your repository URL:
 
 ```
-https://github.com/akifulmohaimin/W26_4495_S3_AkifulM.git
+https://github.com/akifulmohaimin/W26_4495_S3_AkifulM
 ```
 
 Open the cloned folder in VS Code.
@@ -106,9 +106,10 @@ You should now see `(venv)` in the terminal.
 
 ---
 
-## Step 3 – Install Python Dependencies
+## Step 3 – Install Python Dependencies in the Implementation Folder
 
 ```
+cd Implementation
 pip install -r requirements.txt
 ```
 
